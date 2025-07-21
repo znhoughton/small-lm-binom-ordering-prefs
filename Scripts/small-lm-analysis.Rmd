@@ -1,0 +1,1298 @@
+---
+title: "small-lm-analysis"
+author: "Zachary Houghton"
+date: "2025-07-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(brms)
+```
+
+# Prompt 1: "This next phrase must be formed compositionally: "
+
+## Prep Data
+
+Read in our model data
+
+```{r}
+corpus = read_csv('../Data/nonce_and_attested_binoms.csv')
+
+model_smolm1 = read_csv('../Data/0-smolm-autoreg-bpe-babylm-1e-3_binom_ordering_prefs.csv') %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
+  
+model_smolm2 = read_csv('../Data/0-smolm-autoreg-bpe-babylm-seed_211-1e-3_binom_ordering_prefs.csv') %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
+  
+
+model_smolm3 = read_csv('../Data/0-smolm-autoreg-bpe-babylm-seed_1024-1e-3_binom_ordering_prefs.csv') %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
+  
+
+model_smolm1 = model_smolm1 %>%
+  rename(no_final_stress = `*BStress`)
+
+model_smolm2 = model_smolm2 %>%
+  rename(no_final_stress = `*BStress`)
+
+model_smolm3 = model_smolm3 %>%
+  rename(no_final_stress = `*BStress`)
+```
+
+```{r}
+
+model_smolm1_attested = model_smolm1 %>%
+  filter(Attested == 1)
+
+model_smolm1_novel = model_smolm1 %>%
+  filter(Attested == 0)
+
+model_smolm2_attested = model_smolm2 %>%
+  filter(Attested == 1)
+
+model_smolm2_novel = model_smolm2 %>%
+  filter(Attested == 0)
+
+model_smolm3_attested = model_smolm3 %>%
+  filter(Attested == 1)
+
+model_smolm3_novel = model_smolm3 %>%
+  filter(Attested == 0)
+
+#bigram_counts = read_csv('../Data/olmo_bigram_freqs.csv')
+#onegram_corpus_size = 1560674367427
+#count_and = 43378012800
+
+#bigram_counts = bigram_counts %>%
+  #mutate(ngram = str_replace_all(ngram, '\t', ' '))
+# 
+# data_main_model = data_main_model %>%
+#   mutate(bigram1_alpha = paste0(Word1, ' and'),
+#          bigram2_alpha = paste0('and ', Word2),
+#          bigram1_nonalpha = paste0(Word2, ' and'),
+#          bigram2_nonalpha = paste0('and ', Word1)
+#          )
+# 
+# data_main_model = data_main_model %>%
+#   left_join(bigram_counts, by = c('bigram1_alpha' = 'ngram')) %>%
+#   rename(count_bigram1_alpha = count) %>%
+#   left_join(bigram_counts, by = c('bigram2_alpha' = 'ngram')) %>%
+#   rename(count_bigram2_alpha = count) %>%
+#   left_join(bigram_counts, by = c('bigram1_nonalpha' = 'ngram')) %>%
+#   rename(count_bigram1_nonalpha = count) %>%
+#   left_join(bigram_counts, by = c('bigram2_nonalpha' = 'ngram')) %>%
+#   rename(count_bigram2_nonalpha = count) %>%
+#   mutate(corpus_size = onegram_corpus_size) %>%
+#   mutate(count_and = count_and)
+
+# 
+# data_main_model = data_main_model %>%
+#   mutate(bigram_prob_alpha = (Word1_freq / corpus_size) * (count_bigram1_alpha / Word1_freq) * (count_bigram2_alpha / count_and),
+#          bigram_prob_nonalpha = (Word2_freq / corpus_size) * (count_bigram1_nonalpha / Word2_freq) * (count_bigram2_nonalpha / count_and),
+#          log_bigram_prob_alpha = log(bigram_prob_alpha),
+#          log_bigram_prob_nonalpha = log(bigram_prob_nonalpha),
+#          log_bigram_odds_ratio = log_bigram_prob_alpha - log_bigram_prob_nonalpha)
+#
+```
+
+## Analyses
+
+### Attested Binomials
+
+```{r}
+options(contrasts = c("contr.sum","contr.sum"))
+prior_probs = c(
+  prior(student_t(3, 0, 1), class = 'Intercept'),
+  prior(student_t(3, 0, 1), class = 'sigma'),
+  prior(student_t(3, 0, 1), class = 'b')
+)
+
+
+model_smolm1_attested_model = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+                       data = model_smolm1_attested,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm1_attested_model'
+                      )
+
+model_smolm2_attested_model = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+                       data = model_smolm2_attested,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm2_attested_model'
+                      )
+
+
+model_smolm3_attested_model = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+                       data = model_smolm3_attested,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm3_attested_model'
+                      )
+
+
+fixef(model_smolm1_attested_model)
+fixef(model_smolm2_attested_model)
+fixef(model_smolm3_attested_model)
+```
+
+### Novel Binomials
+
+```{r}
+options(contrasts = c("contr.sum","contr.sum"))
+prior_probs = c(
+  prior(student_t(3, 0, 1), class = 'Intercept'),
+  prior(student_t(3, 0, 1), class = 'sigma'),
+  prior(student_t(3, 0, 1), class = 'b')
+)
+
+
+model_smolm1_novel_model = brm(log_odds ~ GenPref,
+                       data = model_smolm1_novel,
+                       prior = prior_probs,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_smolm1_novel_model'
+                      )
+
+model_smolm2_novel_model = brm(log_odds ~ GenPref,
+                       data = model_smolm2_novel,
+                       prior = prior_probs,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_smolm2_novel_model'
+                      )
+
+model_smolm3_novel_model = brm(log_odds ~ GenPref,
+                       data = model_smolm3_novel,
+                       prior = prior_probs,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_smolm3_novel_model'
+                      )
+
+fixef(model_smolm1_novel_model)
+fixef(model_smolm2_novel_model)
+fixef(model_smolm3_novel_model)
+```
+
+# Prompt 2: "Next item: "
+
+## Prep Data
+
+Read in our model data
+
+```{r}
+
+model_smolm1b = read_csv('../Data/1-smolm-autoreg-bpe-babylm-1e-3_binom_ordering_prefs.csv') %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
+  
+model_smolm2b = read_csv('../Data/1-smolm-autoreg-bpe-babylm-seed_211-1e-3_binom_ordering_prefs.csv') %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
+  
+
+model_smolm3b = read_csv('../Data/1-smolm-autoreg-bpe-babylm-seed_1024-1e-3_binom_ordering_prefs.csv') %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
+  
+
+model_smolm1b = model_smolm1b %>%
+  rename(no_final_stress = `*BStress`)
+
+model_smolm2b = model_smolm2b %>%
+  rename(no_final_stress = `*BStress`)
+
+model_smolm3b = model_smolm3b %>%
+  rename(no_final_stress = `*BStress`)
+```
+
+```{r}
+
+model_smolm1_attestedb = model_smolm1b %>%
+  filter(Attested == 1)
+
+model_smolm1_novelb = model_smolm1b %>%
+  filter(Attested == 0)
+
+model_smolm2_attestedb = model_smolm2b %>%
+  filter(Attested == 1)
+
+model_smolm2_novelb = model_smolm2b %>%
+  filter(Attested == 0)
+
+model_smolm3_attestedb = model_smolm3b %>%
+  filter(Attested == 1)
+
+model_smolm3_novelb = model_smolm3b %>%
+  filter(Attested == 0)
+
+#bigram_counts = read_csv('../Data/olmo_bigram_freqs.csv')
+#onegram_corpus_size = 1560674367427
+#count_and = 43378012800
+
+#bigram_counts = bigram_counts %>%
+  #mutate(ngram = str_replace_all(ngram, '\t', ' '))
+# 
+# data_main_model = data_main_model %>%
+#   mutate(bigram1_alpha = paste0(Word1, ' and'),
+#          bigram2_alpha = paste0('and ', Word2),
+#          bigram1_nonalpha = paste0(Word2, ' and'),
+#          bigram2_nonalpha = paste0('and ', Word1)
+#          )
+# 
+# data_main_model = data_main_model %>%
+#   left_join(bigram_counts, by = c('bigram1_alpha' = 'ngram')) %>%
+#   rename(count_bigram1_alpha = count) %>%
+#   left_join(bigram_counts, by = c('bigram2_alpha' = 'ngram')) %>%
+#   rename(count_bigram2_alpha = count) %>%
+#   left_join(bigram_counts, by = c('bigram1_nonalpha' = 'ngram')) %>%
+#   rename(count_bigram1_nonalpha = count) %>%
+#   left_join(bigram_counts, by = c('bigram2_nonalpha' = 'ngram')) %>%
+#   rename(count_bigram2_nonalpha = count) %>%
+#   mutate(corpus_size = onegram_corpus_size) %>%
+#   mutate(count_and = count_and)
+
+# 
+# data_main_model = data_main_model %>%
+#   mutate(bigram_prob_alpha = (Word1_freq / corpus_size) * (count_bigram1_alpha / Word1_freq) * (count_bigram2_alpha / count_and),
+#          bigram_prob_nonalpha = (Word2_freq / corpus_size) * (count_bigram1_nonalpha / Word2_freq) * (count_bigram2_nonalpha / count_and),
+#          log_bigram_prob_alpha = log(bigram_prob_alpha),
+#          log_bigram_prob_nonalpha = log(bigram_prob_nonalpha),
+#          log_bigram_odds_ratio = log_bigram_prob_alpha - log_bigram_prob_nonalpha)
+#
+```
+
+## Analyses
+
+### Attested Binomials
+
+```{r}
+
+
+model_smolm1_attested_modelb = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+                       data = model_smolm1_attestedb,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm1_attested_modelb'
+                      )
+
+model_smolm2_attested_modelb = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+                       data = model_smolm2_attestedb,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm2_attested_modelb'
+                      )
+
+
+model_smolm3_attested_modelb = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+                       data = model_smolm3_attestedb,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm3_attested_modelb'
+                      )
+
+
+fixef(model_smolm1_attested_modelb)
+fixef(model_smolm2_attested_modelb)
+fixef(model_smolm3_attested_modelb)
+```
+
+### Novel Binomials
+
+```{r}
+
+
+model_smolm1_novel_modelb = brm(log_odds ~ GenPref,
+                       data = model_smolm1_novelb,
+                       prior = prior_probs,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_smolm1_novel_modelb'
+                      )
+
+model_smolm2_novel_modelb = brm(log_odds ~ GenPref,
+                       data = model_smolm2_novelb,
+                       prior = prior_probs,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_smolm2_novel_modelb'
+                      )
+
+model_smolm3_novel_modelb = brm(log_odds ~ GenPref,
+                       data = model_smolm3_novelb,
+                       prior = prior_probs,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_smolm3_novel_modelb'
+                      )
+
+fixef(model_smolm1_novel_modelb)
+fixef(model_smolm2_novel_modelb)
+fixef(model_smolm3_novel_modelb)
+```
+
+
+# Prompt 3: "example: "
+
+## Prep Data
+
+Read in our model data
+
+```{r}
+
+model_smolm1c = read_csv('../Data/2-smolm-autoreg-bpe-babylm-1e-3_binom_ordering_prefs.csv') %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
+  
+model_smolm2c = read_csv('../Data/2-smolm-autoreg-bpe-babylm-seed_211-1e-3_binom_ordering_prefs.csv') %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
+  
+
+model_smolm3c = read_csv('../Data/2-smolm-autoreg-bpe-babylm-seed_1024-1e-3_binom_ordering_prefs.csv') %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
+  
+
+model_smolm1c = model_smolm1c %>%
+  rename(no_final_stress = `*BStress`)
+
+model_smolm2c = model_smolm2c %>%
+  rename(no_final_stress = `*BStress`)
+
+model_smolm3c = model_smolm3c %>%
+  rename(no_final_stress = `*BStress`)
+```
+
+```{r}
+
+model_smolm1_attestedc = model_smolm1c %>%
+  filter(Attested == 1)
+
+model_smolm1_novelc = model_smolm1c %>%
+  filter(Attested == 0)
+
+model_smolm2_attestedc = model_smolm2c %>%
+  filter(Attested == 1)
+
+model_smolm2_novelc = model_smolm2c %>%
+  filter(Attested == 0)
+
+model_smolm3_attestedc = model_smolm3c %>%
+  filter(Attested == 1)
+
+model_smolm3_novelc = model_smolm3c %>%
+  filter(Attested == 0)
+
+#bigram_counts = read_csv('../Data/olmo_bigram_freqs.csv')
+#onegram_corpus_size = 1560674367427
+#count_and = 43378012800
+
+#bigram_counts = bigram_counts %>%
+  #mutate(ngram = str_replace_all(ngram, '\t', ' '))
+# 
+# data_main_model = data_main_model %>%
+#   mutate(bigram1_alpha = paste0(Word1, ' and'),
+#          bigram2_alpha = paste0('and ', Word2),
+#          bigram1_nonalpha = paste0(Word2, ' and'),
+#          bigram2_nonalpha = paste0('and ', Word1)
+#          )
+# 
+# data_main_model = data_main_model %>%
+#   left_join(bigram_counts, by = c('bigram1_alpha' = 'ngram')) %>%
+#   rename(count_bigram1_alpha = count) %>%
+#   left_join(bigram_counts, by = c('bigram2_alpha' = 'ngram')) %>%
+#   rename(count_bigram2_alpha = count) %>%
+#   left_join(bigram_counts, by = c('bigram1_nonalpha' = 'ngram')) %>%
+#   rename(count_bigram1_nonalpha = count) %>%
+#   left_join(bigram_counts, by = c('bigram2_nonalpha' = 'ngram')) %>%
+#   rename(count_bigram2_nonalpha = count) %>%
+#   mutate(corpus_size = onegram_corpus_size) %>%
+#   mutate(count_and = count_and)
+
+# 
+# data_main_model = data_main_model %>%
+#   mutate(bigram_prob_alpha = (Word1_freq / corpus_size) * (count_bigram1_alpha / Word1_freq) * (count_bigram2_alpha / count_and),
+#          bigram_prob_nonalpha = (Word2_freq / corpus_size) * (count_bigram1_nonalpha / Word2_freq) * (count_bigram2_nonalpha / count_and),
+#          log_bigram_prob_alpha = log(bigram_prob_alpha),
+#          log_bigram_prob_nonalpha = log(bigram_prob_nonalpha),
+#          log_bigram_odds_ratio = log_bigram_prob_alpha - log_bigram_prob_nonalpha)
+#
+```
+
+## Analyses
+
+### Attested Binomials
+
+```{r}
+
+
+model_smolm1_attested_modelc = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+                       data = model_smolm1_attestedc,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm1_attested_modelc'
+                      )
+
+model_smolm2_attested_modelc = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+                       data = model_smolm2_attestedc,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm2_attested_modelc'
+                      )
+
+
+model_smolm3_attested_modelc = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+                       data = model_smolm3_attestedc,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm3_attested_modelc'
+                      )
+
+
+fixef(model_smolm1_attested_modelc)
+fixef(model_smolm2_attested_modelc)
+fixef(model_smolm3_attested_modelc)
+```
+
+### Novel Binomials
+
+```{r}
+
+
+model_smolm1_novel_modelc = brm(log_odds ~ GenPref,
+                       data = model_smolm1_novelc,
+                       prior = prior_probs,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_smolm1_novel_modelc'
+                      )
+
+model_smolm2_novel_modelc = brm(log_odds ~ GenPref,
+                       data = model_smolm2_novelc,
+                       prior = prior_probs,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_smolm2_novel_modelc'
+                      )
+
+model_smolm3_novel_modelc = brm(log_odds ~ GenPref,
+                       data = model_smolm3_novelc,
+                       prior = prior_probs,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_smolm3_novel_modelc'
+                      )
+
+fixef(model_smolm1_novel_modelc)
+fixef(model_smolm2_novel_modelc)
+fixef(model_smolm3_novel_modelc)
+```
+
+
+
+# Prompt 4: "instance: "
+
+## Prep Data
+
+Read in our model data
+
+```{r}
+
+model_smolm1d = read_csv('../Data/3-smolm-autoreg-bpe-babylm-1e-3_binom_ordering_prefs.csv') %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
+  
+model_smolm2d = read_csv('../Data/3-smolm-autoreg-bpe-babylm-seed_211-1e-3_binom_ordering_prefs.csv') %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
+  
+
+model_smolm3d = read_csv('../Data/3-smolm-autoreg-bpe-babylm-seed_1024-1e-3_binom_ordering_prefs.csv') %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
+  
+
+model_smolm1d = model_smolm1d %>%
+  rename(no_final_stress = `*BStress`)
+
+model_smolm2d = model_smolm2d %>%
+  rename(no_final_stress = `*BStress`)
+
+model_smolm3d = model_smolm3d %>%
+  rename(no_final_stress = `*BStress`)
+```
+
+```{r}
+
+model_smolm1_attestedd = model_smolm1d %>%
+  filter(Attested == 1)
+
+model_smolm1_noveld = model_smolm1d %>%
+  filter(Attested == 0)
+
+model_smolm2_attestedd = model_smolm2d %>%
+  filter(Attested == 1)
+
+model_smolm2_noveld = model_smolm2d %>%
+  filter(Attested == 0)
+
+model_smolm3_attestedd = model_smolm3d %>%
+  filter(Attested == 1)
+
+model_smolm3_noveld = model_smolm3d %>%
+  filter(Attested == 0)
+
+#bigram_counts = read_csv('../Data/olmo_bigram_freqs.csv')
+#onegram_corpus_size = 1560674367427
+#count_and = 43378012800
+
+#bigram_counts = bigram_counts %>%
+  #mutate(ngram = str_replace_all(ngram, '\t', ' '))
+# 
+# data_main_model = data_main_model %>%
+#   mutate(bigram1_alpha = paste0(Word1, ' and'),
+#          bigram2_alpha = paste0('and ', Word2),
+#          bigram1_nonalpha = paste0(Word2, ' and'),
+#          bigram2_nonalpha = paste0('and ', Word1)
+#          )
+# 
+# data_main_model = data_main_model %>%
+#   left_join(bigram_counts, by = c('bigram1_alpha' = 'ngram')) %>%
+#   rename(count_bigram1_alpha = count) %>%
+#   left_join(bigram_counts, by = c('bigram2_alpha' = 'ngram')) %>%
+#   rename(count_bigram2_alpha = count) %>%
+#   left_join(bigram_counts, by = c('bigram1_nonalpha' = 'ngram')) %>%
+#   rename(count_bigram1_nonalpha = count) %>%
+#   left_join(bigram_counts, by = c('bigram2_nonalpha' = 'ngram')) %>%
+#   rename(count_bigram2_nonalpha = count) %>%
+#   mutate(corpus_size = onegram_corpus_size) %>%
+#   mutate(count_and = count_and)
+
+# 
+# data_main_model = data_main_model %>%
+#   mutate(bigram_prob_alpha = (Word1_freq / corpus_size) * (count_bigram1_alpha / Word1_freq) * (count_bigram2_alpha / count_and),
+#          bigram_prob_nonalpha = (Word2_freq / corpus_size) * (count_bigram1_nonalpha / Word2_freq) * (count_bigram2_nonalpha / count_and),
+#          log_bigram_prob_alpha = log(bigram_prob_alpha),
+#          log_bigram_prob_nonalpha = log(bigram_prob_nonalpha),
+#          log_bigram_odds_ratio = log_bigram_prob_alpha - log_bigram_prob_nonalpha)
+#
+```
+
+## Analyses
+
+### Attested Binomials
+
+```{r}
+
+
+model_smolm1_attested_modeld = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+                       data = model_smolm1_attestedd,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm1_attested_modeld'
+                      )
+
+model_smolm2_attested_modeld = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+                       data = model_smolm2_attestedd,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm2_attested_modeld'
+                      )
+
+
+model_smolm3_attested_modeld = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+                       data = model_smolm3_attestedd,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm3_attested_modeld'
+                      )
+
+
+fixef(model_smolm1_attested_modeld)
+fixef(model_smolm2_attested_modeld)
+fixef(model_smolm3_attested_modeld)
+```
+
+### Novel Binomials
+
+```{r}
+
+
+model_smolm1_novel_modeld = brm(log_odds ~ GenPref,
+                       data = model_smolm1_noveld,
+                       prior = prior_probs,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_smolm1_novel_modeld'
+                      )
+
+model_smolm2_novel_modeld = brm(log_odds ~ GenPref,
+                       data = model_smolm2_noveld,
+                       prior = prior_probs,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_smolm2_novel_modeld'
+                      )
+
+model_smolm3_novel_modeld = brm(log_odds ~ GenPref,
+                       data = model_smolm3_noveld,
+                       prior = prior_probs,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_smolm3_novel_modeld'
+                      )
+
+fixef(model_smolm1_novel_modeld)
+fixef(model_smolm2_novel_modeld)
+fixef(model_smolm3_novel_modeld)
+```
+
+
+
+# Prompt 5: "try this: "
+
+## Prep Data
+
+Read in our model data
+
+```{r}
+
+model_smolm1e = read_csv('../Data/4-smolm-autoreg-bpe-babylm-1e-3_binom_ordering_prefs.csv') %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
+  
+model_smolm2e = read_csv('../Data/4-smolm-autoreg-bpe-babylm-seed_211-1e-3_binom_ordering_prefs.csv') %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
+  
+
+model_smolm3e = read_csv('../Data/4-smolm-autoreg-bpe-babylm-seed_1024-1e-3_binom_ordering_prefs.csv') %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
+  
+
+model_smolm1e = model_smolm1e %>%
+  rename(no_final_stress = `*BStress`)
+
+model_smolm2e = model_smolm2e %>%
+  rename(no_final_stress = `*BStress`)
+
+model_smolm3e = model_smolm3e %>%
+  rename(no_final_stress = `*BStress`)
+```
+
+```{r}
+
+model_smolm1_attestede = model_smolm1e %>%
+  filter(Attested == 1)
+
+model_smolm1_novele = model_smolm1e %>%
+  filter(Attested == 0)
+
+model_smolm2_attestede = model_smolm2e %>%
+  filter(Attested == 1)
+
+model_smolm2_novele = model_smolm2e %>%
+  filter(Attested == 0)
+
+model_smolm3_attestede = model_smolm3e %>%
+  filter(Attested == 1)
+
+model_smolm3_novele = model_smolm3e %>%
+  filter(Attested == 0)
+
+#bigram_counts = read_csv('../Data/olmo_bigram_freqs.csv')
+#onegram_corpus_size = 1560674367427
+#count_and = 43378012800
+
+#bigram_counts = bigram_counts %>%
+  #mutate(ngram = str_replace_all(ngram, '\t', ' '))
+# 
+# data_main_model = data_main_model %>%
+#   mutate(bigram1_alpha = paste0(Word1, ' and'),
+#          bigram2_alpha = paste0('and ', Word2),
+#          bigram1_nonalpha = paste0(Word2, ' and'),
+#          bigram2_nonalpha = paste0('and ', Word1)
+#          )
+# 
+# data_main_model = data_main_model %>%
+#   left_join(bigram_counts, by = c('bigram1_alpha' = 'ngram')) %>%
+#   rename(count_bigram1_alpha = count) %>%
+#   left_join(bigram_counts, by = c('bigram2_alpha' = 'ngram')) %>%
+#   rename(count_bigram2_alpha = count) %>%
+#   left_join(bigram_counts, by = c('bigram1_nonalpha' = 'ngram')) %>%
+#   rename(count_bigram1_nonalpha = count) %>%
+#   left_join(bigram_counts, by = c('bigram2_nonalpha' = 'ngram')) %>%
+#   rename(count_bigram2_nonalpha = count) %>%
+#   mutate(corpus_size = onegram_corpus_size) %>%
+#   mutate(count_and = count_and)
+
+# 
+# data_main_model = data_main_model %>%
+#   mutate(bigram_prob_alpha = (Word1_freq / corpus_size) * (count_bigram1_alpha / Word1_freq) * (count_bigram2_alpha / count_and),
+#          bigram_prob_nonalpha = (Word2_freq / corpus_size) * (count_bigram1_nonalpha / Word2_freq) * (count_bigram2_nonalpha / count_and),
+#          log_bigram_prob_alpha = log(bigram_prob_alpha),
+#          log_bigram_prob_nonalpha = log(bigram_prob_nonalpha),
+#          log_bigram_odds_ratio = log_bigram_prob_alpha - log_bigram_prob_nonalpha)
+#
+```
+
+## Analyses
+
+### Attested Binomials
+
+```{r}
+
+
+model_smolm1_attested_modele = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+                       data = model_smolm1_attestede,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm1_attested_modele'
+                      )
+
+model_smolm2_attested_modele = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+                       data = model_smolm2_attestede,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm2_attested_modele'
+                      )
+
+
+model_smolm3_attested_modele = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+                       data = model_smolm3_attestede,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm3_attested_modele'
+                      )
+
+
+fixef(model_smolm1_attested_modele)
+fixef(model_smolm2_attested_modele)
+fixef(model_smolm3_attested_modele)
+```
+
+### Novel Binomials
+
+```{r}
+
+
+model_smolm1_novel_modele = brm(log_odds ~ GenPref,
+                       data = model_smolm1_novele,
+                       prior = prior_probs,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_smolm1_novel_modele'
+                      )
+
+model_smolm2_novel_modele = brm(log_odds ~ GenPref,
+                       data = model_smolm2_novele,
+                       prior = prior_probs,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_smolm2_novel_modele'
+                      )
+
+model_smolm3_novel_modele = brm(log_odds ~ GenPref,
+                       data = model_smolm3_novele,
+                       prior = prior_probs,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_smolm3_novel_modele'
+                      )
+
+fixef(model_smolm1_novel_modele)
+fixef(model_smolm2_novel_modele)
+fixef(model_smolm3_novel_modele)
+```
+
+
+
+# Prompt 6: "[BOS]"
+
+## Prep Data
+
+Read in our model data
+
+```{r}
+
+model_smolm1f = read_csv('../Data/5-smolm-autoreg-bpe-babylm-1e-3_binom_ordering_prefs.csv') %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
+  
+model_smolm2f = read_csv('../Data/5-smolm-autoreg-bpe-babylm-seed_211-1e-3_binom_ordering_prefs.csv') %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
+  
+
+model_smolm3f = read_csv('../Data/5-smolm-autoreg-bpe-babylm-seed_1024-1e-3_binom_ordering_prefs.csv') %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
+  
+
+model_smolm1f = model_smolm1f %>%
+  rename(no_final_stress = `*BStress`)
+
+model_smolm2f = model_smolm2f %>%
+  rename(no_final_stress = `*BStress`)
+
+model_smolm3f = model_smolm3f %>%
+  rename(no_final_stress = `*BStress`)
+```
+
+```{r}
+
+model_smolm1_attestedf = model_smolm1f %>%
+  filter(Attested == 1)
+
+model_smolm1_novelf = model_smolm1f %>%
+  filter(Attested == 0)
+
+model_smolm2_attestedf = model_smolm2f %>%
+  filter(Attested == 1)
+
+model_smolm2_novelf = model_smolm2f %>%
+  filter(Attested == 0)
+
+model_smolm3_attestedf = model_smolm3f %>%
+  filter(Attested == 1)
+
+model_smolm3_novelf = model_smolm3f %>%
+  filter(Attested == 0)
+
+#bigram_counts = read_csv('../Data/olmo_bigram_freqs.csv')
+#onegram_corpus_size = 1560674367427
+#count_and = 43378012800
+
+#bigram_counts = bigram_counts %>%
+  #mutate(ngram = str_replace_all(ngram, '\t', ' '))
+# 
+# data_main_model = data_main_model %>%
+#   mutate(bigram1_alpha = paste0(Word1, ' and'),
+#          bigram2_alpha = paste0('and ', Word2),
+#          bigram1_nonalpha = paste0(Word2, ' and'),
+#          bigram2_nonalpha = paste0('and ', Word1)
+#          )
+# 
+# data_main_model = data_main_model %>%
+#   left_join(bigram_counts, by = c('bigram1_alpha' = 'ngram')) %>%
+#   rename(count_bigram1_alpha = count) %>%
+#   left_join(bigram_counts, by = c('bigram2_alpha' = 'ngram')) %>%
+#   rename(count_bigram2_alpha = count) %>%
+#   left_join(bigram_counts, by = c('bigram1_nonalpha' = 'ngram')) %>%
+#   rename(count_bigram1_nonalpha = count) %>%
+#   left_join(bigram_counts, by = c('bigram2_nonalpha' = 'ngram')) %>%
+#   rename(count_bigram2_nonalpha = count) %>%
+#   mutate(corpus_size = onegram_corpus_size) %>%
+#   mutate(count_and = count_and)
+
+# 
+# data_main_model = data_main_model %>%
+#   mutate(bigram_prob_alpha = (Word1_freq / corpus_size) * (count_bigram1_alpha / Word1_freq) * (count_bigram2_alpha / count_and),
+#          bigram_prob_nonalpha = (Word2_freq / corpus_size) * (count_bigram1_nonalpha / Word2_freq) * (count_bigram2_nonalpha / count_and),
+#          log_bigram_prob_alpha = log(bigram_prob_alpha),
+#          log_bigram_prob_nonalpha = log(bigram_prob_nonalpha),
+#          log_bigram_odds_ratio = log_bigram_prob_alpha - log_bigram_prob_nonalpha)
+#
+```
+
+## Analyses
+
+### Attested Binomials
+
+```{r}
+
+
+model_smolm1_attested_modelf = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+                       data = model_smolm1_attestedf,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm1_attested_modelf'
+                      )
+
+model_smolm2_attested_modelf = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+                       data = model_smolm2_attestedf,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm2_attested_modelf'
+                      )
+
+
+model_smolm3_attested_modelf = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+                       data = model_smolm3_attestedf,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm3_attested_modelf'
+                      )
+
+
+fixef(model_smolm1_attested_modelf)
+fixef(model_smolm2_attested_modelf)
+fixef(model_smolm3_attested_modelf)
+```
+
+### Novel Binomials
+
+```{r}
+
+
+model_smolm1_novel_modelf = brm(log_odds ~ GenPref,
+                       data = model_smolm1_novelf,
+                       prior = prior_probs,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_smolm1_novel_modelf'
+                      )
+
+model_smolm2_novel_modelf = brm(log_odds ~ GenPref,
+                       data = model_smolm2_novelf,
+                       prior = prior_probs,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_smolm2_novel_modelf'
+                      )
+
+model_smolm3_novel_modelf = brm(log_odds ~ GenPref,
+                       data = model_smolm3_novelf,
+                       prior = prior_probs,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_smolm3_novel_modelf'
+                      )
+
+fixef(model_smolm1_novel_modelf)
+fixef(model_smolm2_novel_modelf)
+fixef(model_smolm3_novel_modelf)
+```
