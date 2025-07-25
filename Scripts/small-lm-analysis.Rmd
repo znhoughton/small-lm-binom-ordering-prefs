@@ -30,7 +30,8 @@ model_smolm1 = read_csv('../Data/0-smolm-autoreg-bpe-babylm-1e-3_binom_ordering_
   mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
   mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
   mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
+                             Attested == 0 ~ 0)) %>%
   mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
   mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
   
@@ -44,7 +45,8 @@ model_smolm2 = read_csv('../Data/0-smolm-autoreg-bpe-babylm-seed_211-1e-3_binom_
   mutate(y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
   mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
   mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
+                             Attested == 0 ~ 0)) %>%
   mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
   mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
   
@@ -59,7 +61,8 @@ model_smolm3 = read_csv('../Data/0-smolm-autoreg-bpe-babylm-seed_1024-1e-3_binom
   mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
   mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
   mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
+                             Attested == 0 ~ 0)) %>%
   mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
   mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
   
@@ -141,9 +144,80 @@ prior_probs = c(
   prior(student_t(3, 0, 1), class = 'sigma'),
   prior(student_t(3, 0, 1), class = 'b')
 )
+model_smolm1_full_df = model_smolm1 
+#model_smolm1_full_df$GenPref = scale(model_smolm1_full_df$GenPref)[,1]
+#model_smolm1_full_df$RelFreq = scale(model_smolm1_full_df$RelFreq)[,1]
+#model_smolm1_full_df$LogCenteredOverallFreq = scale(log(model_smolm1_full_df$OverallFreq + 0.000000001))[,1]
 
 
-model_smolm1_attested_model = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+model_smolm1_full = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+                       data = model_smolm1_full_df,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm1_full'
+                      )
+
+model_smolm1_full_df = model_smolm1
+model_smolm1_full_df$LogOverallFreq = scale(log(model_smolm1_full_df$OverallFreq + 1))[,1]
+
+model_smolm1_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
+                       data = model_smolm1_full_df,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm1_full_log_overall_freq_scaled'
+                      )
+
+
+
+model_smolm2_full_df = model_smolm2
+model_smolm2_full_df$LogOverallFreq = scale(log(model_smolm2_full_df$OverallFreq + 1))[,1]
+
+model_smolm2_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
+                       data = model_smolm2_full_df,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm2_full_log_overall_freq_scaled'
+                      )
+
+
+
+model_smolm3_full_df = model_smolm3
+model_smolm3_full_df$LogOverallFreq = scale(log(model_smolm3_full_df$OverallFreq + 1))[,1]
+
+model_smolm3_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
+                       data = model_smolm3_full_df,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm3_full_log_overall_freq_scaled'
+                      )
+
+
+
+
+fixef(model_smolm1_full_log_overall_freq_scaled)
+fixef(model_smolm2_full_log_overall_freq_scaled)
+fixef(model_smolm3_full_log_overall_freq_scaled)
+
+
+model_smolm1_attested$LogOverallFreq = scale(log(model_smolm1_attested$OverallFreq))
+
+model_smolm1_attested_model = brm( log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
                        data = model_smolm1_attested,
                        prior = prior_probs,
                        iter = 10000,
@@ -154,7 +228,10 @@ model_smolm1_attested_model = brm( log_odds ~ GenPref + RelFreq + GenPref:Overal
                        file = '../Data/model_smolm1_attested_model'
                       )
 
-model_smolm2_attested_model = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+
+model_smolm2_attested$LogOverallFreq = scale(log(model_smolm2_attested$OverallFreq))
+
+model_smolm2_attested_model = brm( log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
                        data = model_smolm2_attested,
                        prior = prior_probs,
                        iter = 10000,
@@ -165,8 +242,9 @@ model_smolm2_attested_model = brm( log_odds ~ GenPref + RelFreq + GenPref:Overal
                        file = '../Data/model_smolm2_attested_model'
                       )
 
+model_smolm3_attested$LogOverallFreq = scale(log(model_smolm3_attested$OverallFreq))
 
-model_smolm3_attested_model = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+model_smolm3_attested_model = brm( log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
                        data = model_smolm3_attested,
                        prior = prior_probs,
                        iter = 10000,
@@ -233,6 +311,39 @@ model_smolm3_novel_model = brm(log_odds ~ GenPref,
 fixef(model_smolm1_novel_model)
 fixef(model_smolm2_novel_model)
 fixef(model_smolm3_novel_model)
+
+
+
+ce <- conditional_effects(model_smolm1_novel_model, effects = "GenPref",
+                          re_formula = NA)   # fixed effects only
+p = plot(ce, points = TRUE)
+p[[1]] + theme_bw()
+
+
+
+model_smolm1_novel_model_test = brm(log_odds ~ scale(GenPref),
+                       data = model_smolm1_novel,
+                       prior = prior_probs,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_smolm1_novel_model_test2'
+                      )
+
+fixef(model_smolm1_novel_model_test)
+ce <- conditional_effects(model_smolm1_novel_model_test, effects = "GenPref",
+                          re_formula = NA)   # fixed effects only
+p = plot(ce, points = TRUE)
+p[[1]] + 
+  theme_bw() +
+  xlab('Abstract Preferences') +
+  ylab('Log Odds Alphabetical to Nonalphabetical') +
+  theme(axis.title.x = element_text(size = 14),
+        axis.title.y = element_text(size = 14)) 
+
 ```
 
 # Prompt 2: "Next item: "
@@ -253,7 +364,8 @@ model_smolm1b = read_csv('../Data/1-smolm-autoreg-bpe-babylm-1e-3_binom_ordering
   mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
   mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
   mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
+                             Attested == 0 ~ 0)) %>%
   mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
   mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
   
@@ -267,7 +379,8 @@ model_smolm2b = read_csv('../Data/1-smolm-autoreg-bpe-babylm-seed_211-1e-3_binom
   mutate(y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
   mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
   mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
+                             Attested == 0 ~ 0)) %>%
   mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
   mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
   
@@ -282,7 +395,8 @@ model_smolm3b = read_csv('../Data/1-smolm-autoreg-bpe-babylm-seed_1024-1e-3_bino
   mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
   mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
   mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
+                             Attested == 0 ~ 0)) %>%
   mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
   mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
   
@@ -359,6 +473,51 @@ model_smolm3_novelb = model_smolm3b %>%
 
 ```{r}
 
+
+model_smolm1b_full_df = model_smolm1b
+model_smolm1b_full_df$LogOverallFreq = scale(log(model_smolm1b_full_df$OverallFreq + 1))[,1]
+
+model_smolm1b_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
+                       data = model_smolm1b_full_df,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm1b_full_log_overall_freq_scaled'
+                      )
+fixef(model_smolm1b_full_log_overall_freq_scaled)
+
+model_smolm2b_full_df = model_smolm2b
+model_smolm2b_full_df$LogOverallFreq = scale(log(model_smolm2b_full_df$OverallFreq + 1))[,1]
+
+model_smolm2b_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
+                       data = model_smolm2b_full_df,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm2b_full_log_overall_freq_scaled'
+                      )
+fixef(model_smolm2b_full_log_overall_freq_scaled)
+
+model_smolm3b_full_df = model_smolm3b
+model_smolm3b_full_df$LogOverallFreq = scale(log(model_smolm3b_full_df$OverallFreq + 1))[,1]
+
+model_smolm3b_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
+                       data = model_smolm3b_full_df,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm3b_full_log_overall_freq_scaled'
+                      )
+fixef(model_smolm3b_full_log_overall_freq_scaled)
 
 model_smolm1_attested_modelb = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
                        data = model_smolm1_attestedb,
@@ -465,7 +624,8 @@ model_smolm1c = read_csv('../Data/2-smolm-autoreg-bpe-babylm-1e-3_binom_ordering
   mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
   mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
   mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
+                             Attested == 0 ~ 0)) %>%
   mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
   mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
   
@@ -479,7 +639,8 @@ model_smolm2c = read_csv('../Data/2-smolm-autoreg-bpe-babylm-seed_211-1e-3_binom
   mutate(y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
   mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
   mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
+                             Attested == 0 ~ 0)) %>%
   mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
   mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
   
@@ -494,7 +655,8 @@ model_smolm3c = read_csv('../Data/2-smolm-autoreg-bpe-babylm-seed_1024-1e-3_bino
   mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
   mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
   mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
+                             Attested == 0 ~ 0)) %>%
   mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
   mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
   
@@ -571,6 +733,50 @@ model_smolm3_novelc = model_smolm3c %>%
 
 ```{r}
 
+model_smolm1c_full_df = model_smolm1c
+model_smolm1c_full_df$LogOverallFreq = scale(log(model_smolm1c_full_df$OverallFreq + 1))[,1]
+
+model_smolm1c_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
+                       data = model_smolm1c_full_df,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm1c_full_log_overall_freq_scaled'
+                      )
+fixef(model_smolm1c_full_log_overall_freq_scaled)
+
+model_smolm2c_full_df = model_smolm2c
+model_smolm2c_full_df$LogOverallFreq = scale(log(model_smolm2c_full_df$OverallFreq + 1))[,1]
+
+model_smolm2c_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
+                       data = model_smolm2c_full_df,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm2c_full_log_overall_freq_scaled'
+                      )
+fixef(model_smolm2c_full_log_overall_freq_scaled)
+
+model_smolm3c_full_df = model_smolm3c
+model_smolm3c_full_df$LogOverallFreq = scale(log(model_smolm3c_full_df$OverallFreq + 1))[,1]
+
+model_smolm3c_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
+                       data = model_smolm3c_full_df,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm3c_full_log_overall_freq_scaled'
+                      )
+fixef(model_smolm3c_full_log_overall_freq_scaled)
 
 model_smolm1_attested_modelc = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
                        data = model_smolm1_attestedc,
@@ -678,7 +884,8 @@ model_smolm1d = read_csv('../Data/3-smolm-autoreg-bpe-babylm-1e-3_binom_ordering
   mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
   mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
   mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
+                             Attested == 0 ~ 0)) %>%
   mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
   mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
   
@@ -692,7 +899,8 @@ model_smolm2d = read_csv('../Data/3-smolm-autoreg-bpe-babylm-seed_211-1e-3_binom
   mutate(y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
   mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
   mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
+                             Attested == 0 ~ 0)) %>%
   mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
   mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
   
@@ -707,7 +915,8 @@ model_smolm3d = read_csv('../Data/3-smolm-autoreg-bpe-babylm-seed_1024-1e-3_bino
   mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
   mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
   mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
+                             Attested == 0 ~ 0)) %>%
   mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
   mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
   
@@ -783,6 +992,52 @@ model_smolm3_noveld = model_smolm3d %>%
 ### Attested Binomials
 
 ```{r}
+
+model_smolm1d_full_df = model_smolm1d
+model_smolm1d_full_df$LogOverallFreq = scale(log(model_smolm1d_full_df$OverallFreq + 1))[,1]
+
+model_smolm1d_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
+                       data = model_smolm1d_full_df,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm1d_full_log_overall_freq_scaled'
+                      )
+
+model_smolm2d_full_df = model_smolm2d
+model_smolm2d_full_df$LogOverallFreq = scale(log(model_smolm2d_full_df$OverallFreq + 1))[,1]
+
+model_smolm2d_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
+                       data = model_smolm2d_full_df,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm2d_full_log_overall_freq_scaled'
+                      )
+
+
+
+model_smolm3d_full_df = model_smolm3d
+model_smolm3d_full_df$LogOverallFreq = scale(log(model_smolm3d_full_df$OverallFreq + 1))[,1]
+
+model_smolm3d_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
+                       data = model_smolm3d_full_df,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm3d_full_log_overall_freq_scaled'
+                      )
+
+fixef(model_smolm3d_full_log_overall_freq_scaled)
 
 
 model_smolm1_attested_modeld = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
@@ -891,7 +1146,8 @@ model_smolm1e = read_csv('../Data/4-smolm-autoreg-bpe-babylm-1e-3_binom_ordering
   mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
   mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
   mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
+                             Attested == 0 ~ 0)) %>%
   mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
   mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
   
@@ -905,7 +1161,8 @@ model_smolm2e = read_csv('../Data/4-smolm-autoreg-bpe-babylm-seed_211-1e-3_binom
   mutate(y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
   mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
   mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
+                             Attested == 0 ~ 0)) %>%
   mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
   mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
   
@@ -920,7 +1177,8 @@ model_smolm3e = read_csv('../Data/4-smolm-autoreg-bpe-babylm-seed_1024-1e-3_bino
   mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
   mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
   mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
+                             Attested == 0 ~ 0)) %>%
   mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
   mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
   
@@ -996,7 +1254,51 @@ model_smolm3_novele = model_smolm3e %>%
 ### Attested Binomials
 
 ```{r}
+model_smolm1e_full_df = model_smolm1e
+model_smolm1e_full_df$LogOverallFreq = scale(log(model_smolm1e_full_df$OverallFreq + 1))[,1]
 
+model_smolm1e_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
+                       data = model_smolm1e_full_df,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm1e_full_log_overall_freq_scaled'
+                      )
+fixef(model_smolm1e_full_log_overall_freq_scaled)
+
+model_smolm2e_full_df = model_smolm2e
+model_smolm2e_full_df$LogOverallFreq = scale(log(model_smolm2e_full_df$OverallFreq + 1))[,1]
+
+model_smolm2e_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
+                       data = model_smolm2e_full_df,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm2e_full_log_overall_freq_scaled'
+                      )
+fixef(model_smolm2e_full_log_overall_freq_scaled)
+
+
+model_smolm3e_full_df = model_smolm3e
+model_smolm3e_full_df$LogOverallFreq = scale(log(model_smolm3e_full_df$OverallFreq + 1))[,1]
+
+model_smolm3e_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
+                       data = model_smolm3e_full_df,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm3e_full_log_overall_freq_scaled'
+                      )
+fixef(model_smolm3e_full_log_overall_freq_scaled)
 
 model_smolm1_attested_modele = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
                        data = model_smolm1_attestede,
@@ -1104,7 +1406,8 @@ model_smolm1f = read_csv('../Data/5-smolm-autoreg-bpe-babylm-1e-3_binom_ordering
   mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
   mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
   mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
+                             Attested == 0 ~ 0)) %>%
   mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
   mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
   
@@ -1118,7 +1421,8 @@ model_smolm2f = read_csv('../Data/5-smolm-autoreg-bpe-babylm-seed_211-1e-3_binom
   mutate(y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
   mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
   mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
+                             Attested == 0 ~ 0)) %>%
   mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
   mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
   
@@ -1133,7 +1437,8 @@ model_smolm3f = read_csv('../Data/5-smolm-autoreg-bpe-babylm-seed_1024-1e-3_bino
   mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
   mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
   mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5)) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
+                             Attested == 0 ~ 0)) %>%
   mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
   mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
   
@@ -1209,8 +1514,49 @@ model_smolm3_novelf = model_smolm3f %>%
 ### Attested Binomials
 
 ```{r}
+model_smolm1f_full_df = model_smolm1f
+model_smolm1f_full_df$LogOverallFreq = scale(log(model_smolm1f_full_df$OverallFreq + 1))[,1]
 
+model_smolm1f_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
+                       data = model_smolm1f_full_df,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm1f_full_log_overall_freq_scaled'
+                      )
 
+model_smolm2f_full_df = model_smolm2f
+model_smolm2f_full_df$LogOverallFreq = scale(log(model_smolm2f_full_df$OverallFreq + 1))[,1]
+
+model_smolm2f_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
+                       data = model_smolm2f_full_df,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm2f_full_log_overall_freq_scaled'
+                      )
+
+model_smolm3f_full_df = model_smolm3f
+model_smolm3f_full_df$LogOverallFreq = scale(log(model_smolm3f_full_df$OverallFreq + 1))[,1]
+
+model_smolm3f_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
+                       data = model_smolm3f_full_df,
+                       prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_smolm3f_full_log_overall_freq_scaled'
+                      )
+
+fixef(model_smolm1f_full_log_overall_freq_scaled)
 model_smolm1_attested_modelf = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
                        data = model_smolm1_attestedf,
                        prior = prior_probs,

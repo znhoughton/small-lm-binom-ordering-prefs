@@ -57,8 +57,8 @@ def to_tokens_and_logprobs(model, tokenizer, input_texts):
 
 def get_model_prefs(prompt, prompt_value, model_name, tokenizer_name):
 
-  tokenizer = AutoTokenizer.from_pretrained(model_name)
-  model = AutoModelForCausalLM.from_pretrained(tokenizer_name)
+  tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+  model = AutoModelForCausalLM.from_pretrained(model_name)
   #model.config.pad_token_id = model.config.eos_token_id
   model.eval()
   model = model.to(device)
