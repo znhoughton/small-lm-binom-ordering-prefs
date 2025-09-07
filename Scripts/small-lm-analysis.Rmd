@@ -150,7 +150,7 @@ model_smolm1_full_df = model_smolm1
 #model_smolm1_full_df$LogCenteredOverallFreq = scale(log(model_smolm1_full_df$OverallFreq + 0.000000001))[,1]
 
 
-model_smolm1_full = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
+model_smolm1_full = brm(log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
                        data = model_smolm1_full_df,
                        prior = prior_probs,
                        iter = 10000,

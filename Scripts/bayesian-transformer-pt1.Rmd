@@ -1,0 +1,495 @@
+---
+title: "bayesian-transformer-pt1"
+author: "Zachary Houghton"
+date: "2025-08-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(brms)
+
+```
+
+## Load human data
+
+```{r}
+human_prefs = read.csv('../Data/human-prefs.csv') %>%
+  select(-Q10, -`Q9_2_TEXT`)
+binoms = read_csv('../Data/nonce_binoms.csv')
+
+human_prefs = human_prefs[4:nrow(human_prefs),]
+
+human_prefs = human_prefs %>%
+  pivot_longer(!ResponseId, names_to = 'Question', values_to = 'Answer') %>%
+  filter(grepl("^Q", Question)) %>%
+  filter(grepl('and', Answer))
+
+human_prefs = human_prefs %>%
+  mutate(
+    # Split binomial into two words
+    wordA = str_trim(word(Answer, 1)),
+    wordB = str_trim(word(Answer, -1)),
+    
+    # Alphabetically order the two words
+    Word1 = pmin(wordA, wordB),
+    Word2 = pmax(wordA, wordB)
+  ) %>%
+  select(-wordA, -wordB) %>%
+  left_join(binoms)
+
+human_prefs = human_prefs %>%
+  mutate(alpha_answer = case_when(
+    Answer == Alpha ~ 1,
+    Answer == Nonalpha ~ 0
+  ))
+
+human_prefs = human_prefs %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) 
+
+human_prefs = human_prefs %>%
+  group_by(ResponseId) %>%
+  mutate(participant = sample(1:1000, size = 1)) %>%
+  mutate(Item = Alpha) #%>%
+  #mutate(log_odds = scale(log_odds))
+
+
+
+```
+
+## Load LM data
+
+```{r}
+corpus = read_csv('../Data/nonce_and_attested_binoms.csv')
+
+model_lm = read_csv('../Data/3-smolm-autoreg-bpe-babylm-seed_1024-1e-3_binom_ordering_prefs.csv') %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
+                             Attested == 0 ~ 0)) %>%
+  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
+
+model_lm = model_lm %>%
+  rename(no_final_stress = `*BStress`) %>%
+  select(log_odds, Alpha) 
+
+#model_smolm1_attested = model_smolm1 %>%
+  #filter(Attested == 1)
+
+#model_smolm1_attested = model_smolm1_attested 
+```
+
+## Human and LM 
+
+```{r}
+data_human_lm_preds = human_prefs %>%
+  left_join(model_lm)
+
+data_human_lm_preds = data_human_lm_preds %>%
+  na.omit(alpha_answer)
+```
+
+## Models
+
+```{r}
+options(contrasts = c("contr.sum","contr.sum"))
+model_only_human_preds = brm(alpha_answer ~ GenPref + (1 | participant) + (1 | Item),
+                       family = bernoulli(link='logit'),
+                       data = data_human_lm_preds,
+                       #prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       save_pars = save_pars(all = TRUE),
+                       #control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_only_human_preds'
+                      )
+
+model_only_lm_preds = brm(alpha_answer ~ log_odds + (1 | participant) + (1 | Item),
+                       family = bernoulli(link='logit'),
+                       data = data_human_lm_preds,
+                       #prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       save_pars = save_pars(all = TRUE),
+                       #control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_only_lm_preds'
+                      )
+
+model_human_lm_preds = brm(alpha_answer ~ log_odds + GenPref + (1 | participant) + (1 | Item),
+                       family = bernoulli(link='logit'),
+                       data = data_human_lm_preds,
+                       #prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       save_pars = save_pars(all = TRUE),
+                       #control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_human_lm_preds'
+                      )
+
+model_only_human_preds = add_criterion(model_only_human_preds, 'loo')
+model_only_lm_preds = add_criterion(model_only_lm_preds, 'loo')
+model_human_lm_preds = add_criterion(model_human_lm_preds, 'loo')
+```
+
+## Loo Compare
+
+```{r}
+loo_comparisons = data.frame(loo_compare(model_only_human_preds, model_only_lm_preds, model_human_lm_preds))
+loo_comparisons
+```
+
+# Same but with OLMo
+
+## Load LM data
+
+```{r}
+
+data_main_model = read_csv('../Data/allenai_OLMo-7B-0424-hf.csv') 
+
+corpus = read_csv('../Data/nonce_binoms.csv')
+
+data_main_model = data_main_model %>%
+  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
+  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
+
+data_main_model = data_main_model %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals)))
+  #mutate(log_freq = log(OverallFreq))# %>%
+  #mutate(OverallFreq = log_freq - mean(log_freq))# %>%
+  #mutate(GenPref = GenPref - 0.5) %>%
+  #mutate(RelFreq = RelFreq - 0.5)
+
+data_main_model = data_main_model %>%
+  rename(no_final_stress = `*BStress`)
+
+data_main_model = data_main_model %>%
+  select(log_odds, Alpha)
+#model_smolm1_attested = model_smolm1 %>%
+  #filter(Attested == 1)
+
+#model_smolm1_attested = model_smolm1_attested 
+```
+
+## Human and LM 
+
+```{r}
+data_human_lm_preds_olmo = human_prefs %>%
+  left_join(data_main_model)
+
+data_human_lm_preds_olmo = data_human_lm_preds_olmo %>%
+  na.omit(alpha_answer)
+```
+
+## Models
+
+```{r}
+options(contrasts = c("contr.sum","contr.sum"))
+# model_only_human_preds = brm(alpha_answer ~ GenPref + (1 | participant) + (1 | Item), #no need to re-run since this wouldn't change
+#                        family = bernoulli(link='logit'),
+#                        data = data_human_lm_preds,
+#                        #prior = prior_probs,
+#                        iter = 10000,
+#                        warmup = 5000,
+#                        chains = 4,
+#                        cores = 4,
+#                        save_pars = save_pars(all = TRUE),
+#                        #control = list(adapt_delta=0.99, max_treedepth = 20),
+#                        file = '../Data/model_only_human_preds'
+#                       )
+
+model_only_lm_preds_olmo = brm(alpha_answer ~ log_odds + (1 | participant) + (1 | Item),
+                       family = bernoulli(link='logit'),
+                       data = data_human_lm_preds_olmo,
+                       #prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       save_pars = save_pars(all = TRUE),
+                       #control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_only_lm_preds_olmo'
+                      )
+
+model_human_lm_preds_olmo = brm(alpha_answer ~ log_odds + GenPref + (1 | participant) + (1 | Item),
+                       family = bernoulli(link='logit'),
+                       data = data_human_lm_preds_olmo,
+                       #prior = prior_probs,
+                       iter = 12000,
+                       warmup = 6000,
+                       chains = 4,
+                       cores = 4,
+                       save_pars = save_pars(all = TRUE),
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_human_lm_preds_olmo'
+                      )
+
+#model_only_human_preds_olmo = add_criterion(model_only_human_preds_olmo, 'loo')
+model_only_lm_preds_olmo = add_criterion(model_only_lm_preds_olmo, 'loo')
+model_human_lm_preds_olmo = add_criterion(model_human_lm_preds_olmo, 'loo')
+```
+
+## Loo Compare
+
+```{r}
+loo_comparisons_olmo = data.frame(loo_compare(model_only_human_preds, model_only_lm_preds_olmo, model_human_lm_preds_olmo))
+```
+
+
+```{r}
+loo_comparisons
+loo_comparisons_olmo
+```
+# GPT OSS
+
+## Load LM data
+
+```{r}
+
+data_main_model = read_csv('../Data/0-gpt-oss-20b_results.csv') 
+
+corpus = read_csv('../Data/nonce_binoms.csv')
+
+data_main_model = data_main_model %>%
+  mutate(ProbAandB = exp(`alpha_prob`) / (exp(`alpha_prob`) + exp(`nonalpha_prob`))) %>%
+  mutate(log_odds = `alpha_prob` - `nonalpha_prob`)
+
+data_main_model = data_main_model %>%
+  #separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  #select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  #left_join(corpus) %>%
+  #mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals)))
+  #mutate(log_freq = log(OverallFreq))# %>%
+  #mutate(OverallFreq = log_freq - mean(log_freq))# %>%
+  #mutate(GenPref = GenPref - 0.5) %>%
+  #mutate(RelFreq = RelFreq - 0.5)
+
+data_main_model = data_main_model %>%
+  rename(no_final_stress = `*BStress`)
+
+data_main_model = data_main_model %>%
+  select(log_odds, Alpha)
+#model_smolm1_attested = model_smolm1 %>%
+  #filter(Attested == 1)
+
+#model_smolm1_attested = model_smolm1_attested 
+```
+
+## Human and LM 
+
+```{r}
+data_human_lm_preds_oss20b = human_prefs %>%
+  left_join(data_main_model)
+
+data_human_lm_preds_oss20b = data_human_lm_preds_oss20b %>%
+  na.omit(alpha_answer)
+```
+
+## Models
+
+```{r}
+options(contrasts = c("contr.sum","contr.sum"))
+# model_only_human_preds = brm(alpha_answer ~ GenPref + (1 | participant) + (1 | Item), #no need to re-run since this wouldn't change
+#                        family = bernoulli(link='logit'),
+#                        data = data_human_lm_preds,
+#                        #prior = prior_probs,
+#                        iter = 10000,
+#                        warmup = 5000,
+#                        chains = 4,
+#                        cores = 4,
+#                        save_pars = save_pars(all = TRUE),
+#                        #control = list(adapt_delta=0.99, max_treedepth = 20),
+#                        file = '../Data/model_only_human_preds'
+#                       )
+
+model_only_lm_preds_oss20b = brm(alpha_answer ~ log_odds + (1 | participant) + (1 | Item),
+                       family = bernoulli(link='logit'),
+                       data = data_human_lm_preds_oss20b,
+                       #prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       save_pars = save_pars(all = TRUE),
+                       #control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_only_lm_preds_oss20b'
+                      )
+
+model_human_lm_preds_oss20b = brm(alpha_answer ~ log_odds + GenPref + (1 | participant) + (1 | Item),
+                       family = bernoulli(link='logit'),
+                       data = data_human_lm_preds_oss20b,
+                       #prior = prior_probs,
+                       iter = 12000,
+                       warmup = 6000,
+                       chains = 4,
+                       cores = 4,
+                       save_pars = save_pars(all = TRUE),
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_human_lm_preds_oss20b'
+                      )
+
+#model_only_human_preds_olmo = add_criterion(model_only_human_preds_olmo, 'loo')
+model_only_lm_preds_oss20b = add_criterion(model_only_lm_preds_oss20b, 'loo')
+model_human_lm_preds_oss20b = add_criterion(model_human_lm_preds_oss20b, 'loo')
+```
+
+## Loo Compare
+
+```{r}
+loo_comparisons_oss20b = data.frame(loo_compare(model_only_human_preds, model_only_lm_preds_oss20b, model_human_lm_preds_oss20b))
+```
+
+# GPT 5
+
+## Load LM data 
+
+```{r}
+
+data_main_model = read_csv('../Data/gpt-5_binomials_with_judgements.csv') 
+
+corpus = read_csv('../Data/nonce_binoms.csv')
+
+parse_judgements = function(x) {
+  x %>%
+    str_remove_all("\\[|\\]|c\\(|\\)") %>%  # remove brackets or c()
+    str_split(",") %>%                      # split on commas
+    unlist() %>%
+    as.numeric()
+}
+
+# Laplace logit function
+laplace_logit = function(judgements) {
+  judgements = parse_judgements(judgements)
+  k <- sum(judgements, na.rm = TRUE)
+  n <- length(judgements)
+  p <- (k + 0.5) / (n + 1)                  # Laplace smoothing
+  log(p / (1 - p))
+}
+
+
+
+data_main_model = data_main_model %>%
+  rowwise() %>%
+  mutate(log_odds = laplace_logit(Judgements)) %>%
+  ungroup()
+
+data_main_model = data_main_model %>%
+  #separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  #select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  #left_join(corpus) %>%
+  #mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals)))
+  #mutate(log_freq = log(OverallFreq))# %>%
+  #mutate(OverallFreq = log_freq - mean(log_freq))# %>%
+  #mutate(GenPref = GenPref - 0.5) %>%
+  #mutate(RelFreq = RelFreq - 0.5)
+
+data_main_model = data_main_model %>%
+  rename(no_final_stress = `*BStress`)
+
+data_main_model = data_main_model %>%
+  select(log_odds, Alpha)
+#model_smolm1_attested = model_smolm1 %>%
+  #filter(Attested == 1)
+
+#model_smolm1_attested = model_smolm1_attested 
+```
+
+## Human and LM 
+
+```{r}
+data_human_lm_preds_gpt5 = human_prefs %>%
+  left_join(data_main_model)
+
+data_human_lm_preds_gpt5 = data_human_lm_preds_gpt5 %>%
+  na.omit(alpha_answer)
+```
+
+## Models
+
+```{r}
+options(contrasts = c("contr.sum","contr.sum"))
+# model_only_human_preds = brm(alpha_answer ~ GenPref + (1 | participant) + (1 | Item), #no need to re-run since this wouldn't change
+#                        family = bernoulli(link='logit'),
+#                        data = data_human_lm_preds,
+#                        #prior = prior_probs,
+#                        iter = 10000,
+#                        warmup = 5000,
+#                        chains = 4,
+#                        cores = 4,
+#                        save_pars = save_pars(all = TRUE),
+#                        #control = list(adapt_delta=0.99, max_treedepth = 20),
+#                        file = '../Data/model_only_human_preds'
+#                       )
+
+model_only_lm_preds_gpt5 = brm(alpha_answer ~ log_odds + (1 | participant) + (1 | Item),
+                       family = bernoulli(link='logit'),
+                       data = data_human_lm_preds_gpt5,
+                       #prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       save_pars = save_pars(all = TRUE),
+                       #control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_only_lm_preds_gpt5'
+                      )
+
+model_human_lm_preds_gpt5 = brm(alpha_answer ~ log_odds + GenPref + (1 | participant) + (1 | Item),
+                       family = bernoulli(link='logit'),
+                       data = data_human_lm_preds_gpt5,
+                       #prior = prior_probs,
+                       iter = 12000,
+                       warmup = 6000,
+                       chains = 4,
+                       cores = 4,
+                       save_pars = save_pars(all = TRUE),
+                       control = list(adapt_delta=0.99, max_treedepth = 20),
+                       file = '../Data/model_human_lm_preds_gpt5'
+                      )
+
+#model_only_human_preds_olmo = add_criterion(model_only_human_preds_olmo, 'loo')
+model_only_lm_preds_gpt5 = add_criterion(model_only_lm_preds_gpt5, 'loo')
+model_human_lm_preds_gpt5 = add_criterion(model_human_lm_preds_gpt5, 'loo')
+```
+
+## Loo Compare
+
+```{r}
+loo_comparisons_gpt5 = data.frame(loo_compare(model_only_human_preds, model_only_lm_preds_gpt5, model_human_lm_preds_gpt5))
+```
+
+
+```{r}
+loo_comparisons
+loo_comparisons_olmo
+loo_comparisons_oss20b
+loo_comparisons_gpt5
+```
