@@ -1,0 +1,204 @@
+---
+title: "human_analyses"
+author: "Zachary Houghton"
+date: "2025-12-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(brms)
+library(jsonlite)
+```
+
+# Load Data
+
+```{r}
+corpus = read_csv('../Data/nonce_and_attested_binoms.csv')
+
+human_data = read_csv('prelim_data.csv')
+human_data = human_data %>%
+  filter(!is.na(mouse.clicked_name)) %>%
+  mutate(
+    parsed = map(mouse.clicked_name, fromJSON),
+    raw_resp   = map_chr(parsed, ~ .x[length(.x) - 1])
+  ) %>%
+  select(-parsed) %>%
+  mutate(resp = case_when(
+    raw_resp == 'text_10' ~ 'alpha',
+    raw_resp == 'text_11' ~ 'nonalpha'
+  )) %>%
+  select(`SESSION_ID`, mouse.clicked_name, raw_resp, resp, Word1, Word2) %>%
+  rename('participant' = `SESSION_ID`) %>%
+  left_join(corpus)
+  
+
+human_data_plot = human_data %>%
+  filter(!is.na(resp))
+
+ggplot(human_data_plot, aes(x = GenPref, y = RelFreq, color = resp)) +
+  geom_point(alpha = 0.6) +
+  theme_minimal()
+
+ggplot(human_data_plot, aes(GenPref, RelFreq, color = resp)) +
+  geom_point(alpha = 0.5) +
+  stat_smooth(method = "glm", method.args = list(family = binomial),
+              se = FALSE, color = "black") +
+  theme_minimal()
+
+
+human_data_plot = human_data_plot %>%
+  mutate(
+    OverallFreq_log = log10(OverallFreq + 1),
+    OverallFreq_bin = ntile(OverallFreq_log, 3)  # low/mid/high frequency
+  )
+
+p1 = library(dplyr)
+library(ggplot2)
+
+human_data_plot <- human_data_plot %>%
+  mutate(
+    OverallFreq_log = log10(OverallFreq + 1),
+    OverallFreq_bin = ntile(OverallFreq_log, 3),    # low/mid/high
+    GenPref_bin = cut(GenPref, breaks = 20)         # 20 bins from 0–1
+  )
+
+df_gen <- human_data_plot %>%
+  group_by(OverallFreq_bin, GenPref_bin) %>%
+  summarize(
+    GenPref_mid = mean(GenPref),
+    prop_alpha = mean(resp == "alpha"),
+    n = n(),
+    .groups = "drop"
+  )
+
+p1 = ggplot(human_data_plot,
+       aes(
+         x = GenPref,
+         y = log10(OverallFreq + 1),
+         z = as.numeric(resp == "alpha")
+       )) +
+  stat_summary_hex(
+    fun = mean,
+    bins = 40
+  ) +
+  scale_fill_viridis_c(option = "magma", name = "Pr(alpha)") +
+  theme_minimal() +
+  labs(
+    x = "GenPref",
+    y = "log10(OverallFreq + 1)",
+    #title = "Raw probability of alpha across GenPref × OverallFreq"
+  )
+
+
+human_data_plot <- human_data_plot %>%
+  mutate(RelFreq_bin = cut(RelFreq, breaks = 20))
+
+df_rel <- human_data_plot %>%
+  group_by(OverallFreq_bin, RelFreq_bin) %>%
+  summarize(
+    RelFreq_mid = mean(RelFreq),
+    prop_alpha = mean(resp == "alpha"),
+    n = n(),
+    .groups = "drop"
+  )
+
+p2 = ggplot(human_data_plot,
+       aes(
+         x = RelFreq,
+         y = log10(OverallFreq + 1),
+         z = as.numeric(resp == "alpha")
+       )) +
+  stat_summary_hex(
+    fun = mean,
+    bins = 40
+  ) +
+  scale_fill_viridis_c(option = "magma", name = "Pr(alpha)") +
+  theme_minimal() +
+  labs(
+    x = "RelFreq",
+    y = "log10(OverallFreq + 1)",
+    #title = "Raw probability of alpha across RelFreq × OverallFreq"
+  )
+
+
+
+p1 + p2
+
+```
+
+
+
+```{r}
+human_data = human_data %>%
+  mutate(resp_bin = ifelse(resp == "alpha", 1, 0))
+
+
+m_quick = brm(
+  resp_bin ~ GenPref + RelFreq + OverallFreq + GenPref:OverallFreq + RelFreq:OverallFreq,
+  data = human_data,
+  family = bernoulli(link = "logit"),
+  chains = 4,   # quick
+  iter = 8000,  # default, good enough
+  warmup = 4000,
+  cores = 4
+)
+
+
+m_quick_genpref = brm(
+  resp_bin ~ GenPref,
+  data = human_data,
+  family = bernoulli(link = "logit"),
+  chains = 4,   # quick
+  iter = 4000,  # default, good enough
+  warmup = 2000,
+  cores = 4
+)
+
+
+m_quick_relfreq = brm(
+  resp_bin ~ RelFreq,
+  data = human_data,
+  family = bernoulli(link = "logit"),
+  chains = 4,   # quick
+  iter = 4000,  # default, good enough
+  warmup = 2000,
+  cores = 4
+)
+
+m_quick_relfreq_genpref = brm(
+  resp_bin ~ RelFreq + GenPref,
+  data = human_data,
+  family = bernoulli(link = "logit"),
+  chains = 4,   # quick
+  iter = 4000,  # default, good enough
+  warmup = 2000,
+  cores = 4
+)
+
+m_quick_genpref_overallfreq = brm(
+  resp_bin ~ GenPref + OverallFreq + GenPref:OverallFreq,
+  data = human_data,
+  family = bernoulli(link = "logit"),
+  chains = 4,   # quick
+  iter = 4000,  # default, good enough
+  warmup = 2000,
+  cores = 4
+)
+
+m_quick_relfreq_overallfreq = brm(
+  resp_bin ~ RelFreq + OverallFreq + RelFreq:OverallFreq,
+  data = human_data,
+  family = bernoulli(link = "logit"),
+  chains = 4,   # quick
+  iter = 4000,  # default, good enough
+  warmup = 2000,
+  cores = 4
+)
+
+```
+
