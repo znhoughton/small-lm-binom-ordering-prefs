@@ -3,6 +3,17 @@ from collections import Counter
 from tqdm import tqdm
 from openai import OpenAI
 
+# ----------------------------
+# CONNECT TO VLLM ENDPOINT
+# ----------------------------
+client = OpenAI(
+    base_url="https://gpt-oss-120b.vailsys.net/v1",
+    api_key="EMPTY"   # vLLM usually doesn't require auth, but the client demands a key
+)
+
+# ----------------------------
+# SYSTEM PROMPT (unchanged)
+# ----------------------------
 system_prompt = """
 
 You are an expert linguistic annotator.
@@ -60,7 +71,7 @@ Code 1 / -1 / 0.
 
 INTENSE (Intensity / Extremeness)
 The stronger, more extreme, more forceful element comes first.
-Examples: war–peace → 1 ; cruel–unusual → 1
+Examples: war–peace → 1 ; cruel–unusual → 1; rain-snow → 0;
 Code 1 / -1 / 0.
 
 ICON (Sequential / Prerequisite / Scalar Ordering)
@@ -124,60 +135,96 @@ Output: 0 -1 0 0 0 0
 
 """
 
-def annotate_pair(model, system_prompt, wordA, wordB, N=10):
+# ----------------------------
+# ANNOTATION FUNCTION
+# ----------------------------
+def annotate_pair(model, system_prompt, wordA, wordB, N=10, debug=True):
     """
-    Returns the modal annotations for a word pair (wordA, wordB):
-    [Form, Percept, Culture, Power, Intense, Icon]
+    Returns modal [Form, Percept, Culture, Power, Intense, Icon].
+    Includes optional debugging output.
     """
     user_prompt = f"{wordA} {wordB}"
     responses = []
 
     print(f"\nProcessing: {wordA}, {wordB}")
 
-    for _ in range(N):
+    for i in range(N):
+
+        if debug:
+            print(f"\n--- Request {i+1}/{N} ---")
+            print("User prompt:", user_prompt)
+
         resp = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
-            ]
+            ],
+            max_tokens=1000,
+            temperature=0.0,
         )
-        content = resp.choices[0].message.content.strip()
-        print("Raw:", content)
 
+        if debug:
+            print("Raw response object:", resp)
+
+        # ---- SAFETY CHECKS ----
+        if not resp or not getattr(resp, "choices", None):
+            print("⚠ ERROR: vLLM returned no choices.")
+            print("  Full response:", resp)
+            responses.append([0, 0, 0, 0, 0, 0])
+            continue
+
+        msg = resp.choices[0].message
+
+        if msg is None or msg.content is None:
+            print("⚠ ERROR: message.content is None!")
+            print("  Full response:", resp)
+            responses.append([0, 0, 0, 0, 0, 0])
+            continue
+
+        content = msg.content.strip()
+
+        if debug:
+            print("Model content:", repr(content))
+
+        # ---- PARSE OUTPUT ----
         try:
             numbers = list(map(int, content.split()))
             if len(numbers) != 6:
                 raise ValueError("Did not receive six numbers.")
-        except Exception:
-            print("⚠ WARNING: Bad output, substituting zeros")
+        except Exception as e:
+            print("⚠ WARNING: Could not parse the output:", content)
+            print("  Error:", e)
+            print("  Substituting zeros.")
             numbers = [0, 0, 0, 0, 0, 0]
 
         responses.append(numbers)
 
-    # Take modal value column-wise
+    # ---- COMPUTE MODAL VALUES ----
     modal = []
-    for i in range(6):
-        col = [r[i] for r in responses]
+    for j in range(6):
+        col = [r[j] for r in responses]
         modal_val = Counter(col).most_common(1)[0][0]
         modal.append(modal_val)
 
-    return modal  # six integers
+    return modal
 
 
 
+# ----------------------------
+# PIPELINE ON CSV
+# ----------------------------
+input_csv = "fintetuning-binoms-without-constraints-coded.csv"
+output_csv = "binomials_coded.csv"
 
-input_csv = "binomials.csv"      # <-- your file
-output_csv = "binomials_scored.csv"
-
-model = "gpt-oss-120b"           # <-- whatever your vLLM model name is
-N = 10                           # repetitions per pair
+# IMPORTANT: vLLM's "model name" is the *path* you passed to --model/--system-model
+model = "/models/gpt-oss-120b"   
+N = 10
 
 df = pd.read_csv(input_csv)
+#df = df.head(10) #for debugging
 
-# Make sure the CSV has these columns
-assert "WordA" in df.columns and "WordB" in df.columns, \
-    "CSV must contain WordA and WordB columns."
+assert "WordA" in df.columns and "WordB" in df.columns
 
 form_vals = []
 percept_vals = []
@@ -190,7 +237,7 @@ for idx, row in tqdm(df.iterrows(), total=len(df)):
     wordA = str(row["WordA"])
     wordB = str(row["WordB"])
 
-    F, P, C, Pw, I, Ic = annotate_pair(model, system_prompt, wordA, wordB, N=N)
+    F, P, C, Pw, I, Ic = annotate_pair(model, system_prompt, wordA, wordB, N=N, debug = False)
 
     form_vals.append(F)
     percept_vals.append(P)
@@ -199,7 +246,6 @@ for idx, row in tqdm(df.iterrows(), total=len(df)):
     intense_vals.append(I)
     icon_vals.append(Ic)
 
-# Add new columns to dataframe
 df["Form"]    = form_vals
 df["Percept"] = percept_vals
 df["Culture"] = culture_vals
@@ -207,7 +253,5 @@ df["Power"]   = power_vals
 df["Intense"] = intense_vals
 df["Icon"]    = icon_vals
 
-# Save CSV
 df.to_csv(output_csv, index=False)
-
 print(f"\n✨ Done! Saved annotated CSV to: {output_csv}")
