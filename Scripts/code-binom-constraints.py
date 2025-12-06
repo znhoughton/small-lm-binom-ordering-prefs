@@ -138,76 +138,62 @@ Output: 0 -1 0 0 0 0
 # ----------------------------
 # ANNOTATION FUNCTION
 # ----------------------------
-def annotate_pair(model, system_prompt, wordA, wordB, N=10, debug=True):
+from collections import Counter
+
+def annotate_pair(model, system_prompt, wordA, wordB, N=10, debug=False):
     """
     Returns modal [Form, Percept, Culture, Power, Intense, Icon].
-    Includes optional debugging output.
+    Uses a single request with n=N completions.
     """
     user_prompt = f"{wordA} {wordB}"
     responses = []
 
-    print(f"\nProcessing: {wordA}, {wordB}")
-
-    for i in range(N):
-
-        if debug:
-            print(f"\n--- Request {i+1}/{N} ---")
-            print("User prompt:", user_prompt)
-
+    try:
         resp = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            max_tokens=1000,
-            temperature=0.0,
+            max_tokens=5000,
+            temperature=0.2,     # <-- now stochastic, allows n>1
+            top_p=0.95,
+            n=N,                 # <-- works now
         )
+    except Exception as e:
+        print("⚠ ERROR: request failed:", e)
+        return [0, 0, 0, 0, 0, 0]
 
-        if debug:
-            print("Raw response object:", resp)
+    if not resp or not getattr(resp, "choices", None):
+        print("⚠ ERROR: vLLM returned no choices.", resp)
+        return [0, 0, 0, 0, 0, 0]
 
-        # ---- SAFETY CHECKS ----
-        if not resp or not getattr(resp, "choices", None):
-            print("⚠ ERROR: vLLM returned no choices.")
-            print("  Full response:", resp)
-            responses.append([0, 0, 0, 0, 0, 0])
-            continue
-
-        msg = resp.choices[0].message
-
+    for i, choice in enumerate(resp.choices):
+        msg = choice.message
         if msg is None or msg.content is None:
-            print("⚠ ERROR: message.content is None!")
-            print("  Full response:", resp)
-            responses.append([0, 0, 0, 0, 0, 0])
+            responses.append([0,0,0,0,0,0])
             continue
 
         content = msg.content.strip()
 
-        if debug:
-            print("Model content:", repr(content))
-
-        # ---- PARSE OUTPUT ----
         try:
-            numbers = list(map(int, content.split()))
-            if len(numbers) != 6:
-                raise ValueError("Did not receive six numbers.")
-        except Exception as e:
-            print("⚠ WARNING: Could not parse the output:", content)
-            print("  Error:", e)
-            print("  Substituting zeros.")
-            numbers = [0, 0, 0, 0, 0, 0]
+            nums = list(map(int, content.split()))
+            if len(nums) != 6:
+                raise ValueError
+        except:
+            nums = [0,0,0,0,0,0]
 
-        responses.append(numbers)
+        responses.append(nums)
 
-    # ---- COMPUTE MODAL VALUES ----
+    # compute modal values
     modal = []
     for j in range(6):
         col = [r[j] for r in responses]
-        modal_val = Counter(col).most_common(1)[0][0]
-        modal.append(modal_val)
+        modal.append(Counter(col).most_common(1)[0][0])
 
     return modal
+
+
 
 
 
@@ -233,18 +219,25 @@ power_vals = []
 intense_vals = []
 icon_vals = []
 
-for idx, row in tqdm(df.iterrows(), total=len(df)):
-    wordA = str(row["WordA"])
-    wordB = str(row["WordB"])
+from concurrent.futures import ThreadPoolExecutor
 
-    F, P, C, Pw, I, Ic = annotate_pair(model, system_prompt, wordA, wordB, N=N, debug = False)
+def process_row(i):
+    wordA = str(df.at[i, "WordA"])
+    wordB = str(df.at[i, "WordB"])
+    return annotate_pair(model, system_prompt, wordA, wordB, N=N, debug=True)
 
-    form_vals.append(F)
-    percept_vals.append(P)
-    culture_vals.append(C)
-    power_vals.append(Pw)
-    intense_vals.append(I)
-    icon_vals.append(Ic)
+indices = list(range(len(df)))
+
+with ThreadPoolExecutor(max_workers=8) as ex:
+    results = list(tqdm(ex.map(process_row, indices), total=len(df)))
+
+# Unpack results
+form_vals    = [r[0] for r in results]
+percept_vals = [r[1] for r in results]
+culture_vals = [r[2] for r in results]
+power_vals   = [r[3] for r in results]
+intense_vals = [r[4] for r in results]
+icon_vals    = [r[5] for r in results]
 
 df["Form"]    = form_vals
 df["Percept"] = percept_vals
@@ -252,6 +245,7 @@ df["Culture"] = culture_vals
 df["Power"]   = power_vals
 df["Intense"] = intense_vals
 df["Icon"]    = icon_vals
+
 
 df.to_csv(output_csv, index=False)
 print(f"\n✨ Done! Saved annotated CSV to: {output_csv}")
