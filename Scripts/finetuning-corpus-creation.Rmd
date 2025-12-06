@@ -1,0 +1,173 @@
+---
+title: "Finetuning Corpus Creation"
+author: "Zachary Houghton"
+date: "2025-12-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+
+all_binoms = read_csv('../Data/google_binomials_cmudict.csv')
+
+binoms_in_human_exp = read_csv('../Data/nonce_and_attested_binoms.csv') %>%
+  mutate(WordA = Word1, WordB = Word2)
+
+
+
+library(udpipe)
+
+udmodel = udpipe_download_model(language = "english")
+udmodel = udpipe_load_model(udmodel$file_model)
+
+
+
+selected_binoms = all_binoms %>%
+  slice_sample(n = 10000, replace = F) 
+
+binoms_filtered = selected_binoms %>%
+  anti_join(binoms_in_human_exp, by = c("WordA", "WordB"))
+
+library(dplyr)
+library(udpipe)
+
+# starting point: binoms_filtered already created with WordA, WordB
+# binoms_filtered <- selected_binoms %>%
+#   anti_join(binoms_in_human_exp, by = c("WordA", "WordB"))
+
+# ---- POS for WordA ----
+annotA <- as.data.frame(
+  udpipe_annotate(
+    udmodel,
+    x = binoms_filtered$WordA,
+    doc_id = as.character(seq_len(nrow(binoms_filtered)))  # tie each token to row
+  )
+)
+
+worda_tags <- annotA %>%
+  group_by(doc_id) %>%
+  summarise(worda_pos = first(upos), .groups = "drop")
+
+# ---- POS for WordB ----
+annotB <- as.data.frame(
+  udpipe_annotate(
+    udmodel,
+    x = binoms_filtered$WordB,
+    doc_id = as.character(seq_len(nrow(binoms_filtered)))
+  )
+)
+
+wordb_tags <- annotB %>%
+  group_by(doc_id) %>%
+  summarise(wordb_pos = first(upos), .groups = "drop")
+
+# ---- Join tags back by row index (doc_id) ----
+binoms_filtered <- binoms_filtered %>%
+  mutate(row_id = as.character(row_number())) %>%
+  left_join(worda_tags, by = c("row_id" = "doc_id")) %>%
+  left_join(wordb_tags, by = c("row_id" = "doc_id")) %>%
+  select(-row_id)
+
+
+
+binoms_filtered = binoms_filtered %>%
+  filter(worda_pos == 'NOUN' & wordb_pos == 'NOUN') %>%
+  #filter(TotalFreq > 41) %>%
+  slice_sample(n = 5000)
+
+# syllable count = number of vowels with stress digit
+count_syllables <- function(cmu_string) {
+  sum(grepl("[0-2]$", unlist(strsplit(cmu_string, " "))))
+}
+
+final_stress <- function(cmu_string) {
+  phones <- unlist(strsplit(cmu_string, " "))
+  vowel_phones <- phones[grepl("[0-2]$", phones)]
+  if (length(vowel_phones) == 0) return(NA_integer_)
+  last <- tail(vowel_phones, 1)
+  as.integer(sub(".*([0-2])$", "\\1", last))
+}
+
+compute_bstress <- function(cmuA, cmuB) {
+  sA <- final_stress(cmuA)
+  sB <- final_stress(cmuB)
+
+  is_stressA <- sA > 0
+  is_stressB <- sB > 0
+
+  if (is_stressA && !is_stressB) return(1L)
+  if (!is_stressA && is_stressB) return(-1L)
+  0L
+}
+
+# Extract stress pattern: vector of 0/1/2 per vowel
+stress_pattern <- function(cmu_string) {
+  phones <- unlist(strsplit(cmu_string, " "))
+  vowels <- phones[grepl("[0-2]$", phones)]
+  if (length(vowels) == 0) return(integer(0))
+  as.integer(sub(".*([0-2])$", "\\1", vowels))
+}
+
+# Maximum run of unstressed syllables
+max_unstressed_run <- function(pattern) {
+  if (length(pattern) == 0) return(0L)
+  r <- rle(pattern)
+  max(c(0L, r$lengths[r$values == 0]))
+}
+
+# Lapse for ordering X and Y → "X and Y"
+lapse_for_order <- function(cmu_first, cmu_second) {
+  pat_first  <- stress_pattern(cmu_first)
+  pat_second <- stress_pattern(cmu_second)
+  full <- c(pat_first, 0L, pat_second)  # 0 = unstressed “and”
+  max_unstressed_run(full)
+}
+
+# FINAL: Lapse difference with sign flipped
+compute_lapse_diff <- function(wordA, wordB, cmuA, cmuB) {
+
+  if (wordA <= wordB) {
+    # alphabetical: A and B
+    lapse_alpha   <- lapse_for_order(cmuA, cmuB)
+    lapse_nonalph <- lapse_for_order(cmuB, cmuA)
+  } else {
+    # alphabetical: B and A
+    lapse_alpha   <- lapse_for_order(cmuB, cmuA)
+    lapse_nonalph <- lapse_for_order(cmuA, cmuB)
+  }
+
+  # FLIPPED SIGN:
+  # positive = nonalphabetical has worse lapse
+  lapse_nonalph - lapse_alpha
+}
+
+finetuning_binoms = binoms_filtered %>%
+  mutate(Freq = log(WordA_Unigram) - log(WordB_Unigram),
+         )
+
+
+binoms_filtered <- binoms_filtered %>%
+  mutate(
+    Length  = mapply(count_syllables, CMU_B) - mapply(count_syllables, CMU_A),
+    BStress = mapply(compute_bstress, CMU_A, CMU_B),
+    Lapse   = mapply(
+      compute_lapse_diff,
+      WordA, WordB, CMU_A, CMU_B
+    )
+  )
+
+
+binoms_filtered = binoms_filtered %>%
+  mutate(RelFreq = AlphaOrderFreq / TotalFreq,
+         OverallFreq = log(TotalFreq))
+
+
+#write_csv(binoms_filtered, "../Data/fintetuning-binoms-without-constraints-coded.csv")
+
+```
+
+

@@ -20,12 +20,14 @@ library(jsonlite)
 ```{r}
 corpus = read_csv('../Data/nonce_and_attested_binoms.csv')
 
-human_data = read_csv('prelim_data.csv')
+human_data = read_csv('data.csv')
+
 human_data = human_data %>%
   filter(!is.na(mouse.clicked_name)) %>%
   mutate(
-    parsed = map(mouse.clicked_name, fromJSON),
-    raw_resp   = map_chr(parsed, ~ .x[length(.x) - 1])
+    parsed = map(mouse.clicked_name, fromJSON)) %>%
+  filter(lengths(parsed) >= 2) %>%
+  mutate(raw_resp   = map_chr(parsed, ~ .x[length(.x) - 1])
   ) %>%
   select(-parsed) %>%
   mutate(resp = case_when(
@@ -135,16 +137,24 @@ p1 + p2
 
 ```{r}
 human_data = human_data %>%
-  mutate(resp_bin = ifelse(resp == "alpha", 1, 0))
+  mutate(GenPref = GenPref - 0.5,
+         RelFreq = RelFreq - 0.5,
+         OverallFreq = log(OverallFreq))
 
+prior_probs = c(
+  prior(student_t(3, 0, 0.05), class = 'Intercept'),
+  #prior(student_t(3, 0, 0.05), class = 'sigma'),
+  prior(student_t(3, 0, 0.05), class = 'b')
+)
 
 m_quick = brm(
-  resp_bin ~ GenPref + RelFreq + OverallFreq + GenPref:OverallFreq + RelFreq:OverallFreq,
+  resp ~ GenPref + RelFreq + OverallFreq + GenPref:OverallFreq + RelFreq:OverallFreq + (GenPref + RelFreq + OverallFreq + GenPref:OverallFreq + RelFreq:OverallFreq | participant) + (1 | Alpha),
   data = human_data,
   family = bernoulli(link = "logit"),
   chains = 4,   # quick
   iter = 8000,  # default, good enough
   warmup = 4000,
+  prior = prior_probs,
   cores = 4
 )
 
@@ -199,6 +209,55 @@ m_quick_relfreq_overallfreq = brm(
   warmup = 2000,
   cores = 4
 )
+
+```
+
+## Nonce and attested binoms human data
+
+```{r}
+nonce_data = read.csv('human-prefs-nonce.csv') %>%
+  dplyr::select(-Q10, -`Q9_2_TEXT`)
+
+binoms = read_csv('../Data/nonce_binoms.csv')
+
+nonce_data = nonce_data[4:nrow(nonce_data),]
+
+nonce_data = nonce_data %>%
+  pivot_longer(!ResponseId, names_to = 'Question', values_to = 'Answer') %>%
+  filter(grepl("^Q", Question)) %>%
+  filter(grepl('and', Answer))
+
+nonce_data = nonce_data %>%
+  mutate(
+    # Split binomial into two words
+    wordA = str_trim(word(Answer, 1)),
+    wordB = str_trim(word(Answer, -1)),
+    
+    # Alphabetically order the two words
+    Word1 = pmin(wordA, wordB),
+    Word2 = pmax(wordA, wordB)
+  ) %>%
+  dplyr::select(-wordA, -wordB) %>%
+  left_join(binoms)
+
+nonce_data = nonce_data %>%
+  mutate(alpha_answer = case_when(
+    Answer == Alpha ~ 1,
+    Answer == Nonalpha ~ 0
+  ))
+
+nonce_data = nonce_data %>%
+  mutate(participant = ResponseId, resp = Answer, RelFreq = 0, Attested = 1) %>%
+  select(participant, resp, Word1, Word2, Alpha, Nonalpha, OverallFreq, Word1_freq, Word2_freq, Form, Percept, Culture, Power, Intense, Icon, Freq, Len, Lapse, "*BStress", RelFreq, GenPref, Attested)
+
+human_data = human_data %>%
+  select(participant, resp, Word1, Word2, Alpha, Nonalpha, OverallFreq, Word1_freq, Word2_freq, Form, Percept, Culture, Power, Intense, Icon, Freq, Len, Lapse, "*BStress", RelFreq, GenPref, Attested)
+
+
+all_human_data = nonce_data %>%
+  full_join(human_data)
+
+#write_csv(all_human_data, 'all_human_data.csv')
 
 ```
 

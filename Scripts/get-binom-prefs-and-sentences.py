@@ -1,199 +1,213 @@
-from openai import OpenAI
-import random
-import csv
+import pandas as pd
 from collections import Counter
-import os
-
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+from tqdm import tqdm
+from openai import OpenAI
 
 system_prompt = """
 
-You are an expert linguistic annotator.  
-Your task is to annotate pairs of words for six generative ordering constraints:  
-Form, Percept, Culture, Power, Intense, and Icon.
+You are an expert linguistic annotator.
 
-Each constraint is binary-coded from the perspective of the *first* word in the pair:
+Your task is to annotate a pair of words for SIX generative ordering
+constraints:
 
-• 1  = first word favors the constraint  
-• -1 = second word favors the constraint  
-• 0  = neither word favors the constraint  
-
-Your output must ALWAYS be exactly six numbers separated by spaces, 
-in this fixed order:
 Form Percept Culture Power Intense Icon
 
-No explanations, no text, no punctuation, no lists.  
-Only six numbers.
+For each constraint you MUST output one of:
+1   = first word favors the constraint
+-1  = second word favors the constraint
+0   = neither word favors the constraint
 
-------------------------------------------------------------
-CONSTRAINT DEFINITIONS
-(optimized for fast, deterministic application)
-------------------------------------------------------------
+Your output MUST be:
+- exactly SIX numbers
+- separated by single spaces
+- in this order:
+  Form Percept Culture Power Intense Icon
+- with NO other text, punctuation, commentary, or formatting.
+
+If you cannot decide, output 0 for that constraint.
+
+============================================================
+FAST DEFINITIONS (for deterministic coding)
+============================================================
 
 FORM (Relative Formal Markedness)
-The word with the more general, less marked meaning appears earlier.
-Less marked = broader meaning, more general category, simpler, 
-less dependent on context, or the superset in a logical subset relation.
-Examples:
-• flowers and roses → flowers less marked → 1
-• boards and two-by-fours → boards less marked → 1
-• changing and improving → changing less marked → 1
-Code:
-1  = first word is less marked / more general  
--1 = second word is  
-0  = neither clearly is  
+The LESS marked, MORE general, BROADER, or logically SUPERSET term comes first.
+Use 1 if WordA is less marked; -1 if WordB is; 0 if unclear.
+
+Common cues for "less marked":
+- broader category
+- simpler or default meaning
+- not defined in relation to the other
+- superordinate in a subset relation
+Examples: flowers–roses → 1 ; boards–two-by-fours → 1
 
 PERCEPT (Perceptual Markedness)
-Elements more closely connected to the speaker appear first.
-Less marked = more animate, more concrete, more proximal,
-positive, singular, here/front/above, etc.
-Examples:
-• people and soils → animate before inanimate → 1
-• action and mind → concrete before abstract → 1
-Code based on which word is less perceptually marked:
-1, -1, or 0.
+The element CLOSER TO SPEAKER experience comes first:
+animate > inanimate, concrete > abstract, positive > negative,
+singular > plural (count nouns), here/front/above > there/back/below, etc.
+1 = WordA less perceptually marked; -1 WordB; 0 neither.
 
 CULTURE (Cultural Centrality in American culture)
-The more culturally central, common, salient concept appears first.
-Examples:
-• oranges and grapefruit → oranges more central → 1
-• mother and dad → mother more central to caregiving → 1
-Code:
-1, -1, or 0.
+The more culturally central, common, prototypical, or salient concept comes first.
+Examples: oranges–grapefruit → 1 ; mother–dad → 1
+Code 1 / -1 / 0.
 
-POWER (Social/Cultural Power or Priority)
-The more powerful, authoritative, serious-consequence, or dominant
-concept appears first.
-Examples:
-• clergymen and parishioners → clergy more powerful → 1
-• laws and rules → laws carry greater consequences → 1
-Code: 1, -1, or 0.
+POWER (Social or institutional hierarchy, seriousness, authority)
+Whichever concept has more power, authority, dominance, consequence, or status
+comes first.
+Examples: clergymen–parishioners → 1 ; laws–rules → 1
+Code 1 / -1 / 0.
 
 INTENSE (Intensity / Extremeness)
-The more intense, stronger, or more extreme concept appears first.
-Examples:
-• war and peace → war more intense → 1
-• cruel and unusual → cruel more intense → 1
-Code: 1, -1, or 0.
+The stronger, more extreme, more forceful element comes first.
+Examples: war–peace → 1 ; cruel–unusual → 1
+Code 1 / -1 / 0.
 
 ICON (Sequential / Prerequisite / Scalar Ordering)
+NON-ZERO ONLY IF the pair *requires* a BEFORE-AFTER or prerequisite relation
+inherent to meaning (chronological, causal, directional, scalar).
 
-A non-zero code is ONLY used if the two words inherently *require* or *encode*
-a BEFORE-AFTER, prerequisite, causal, or scalar order in their meaning.
+Valid: achieve→maintain, slow→stop, before→after, cause→effect, here→there (movement).
+INVALID:
+- invention history
+- cultural/technological evolution
+- newer/older devices
+- mere typical order of usage
+- popularity or frequency
+If no inherent sequence → 0.
 
-Valid examples:
-• achieve → maintain
-• slow → stop
-• before → after
-• here → there (movement)
-• cause → effect
+============================================================
+CRITICAL RULES (OSS models must obey)
+============================================================
+• Respond ONLY with six numbers.  
+• No explanation, no definitions, no restatement of input.  
+• No commas, brackets, quotes, or labels.  
+• If any constraint is ambiguous → output 0 for that constraint.  
+• NEVER invent new constraints.  
+• ALWAYS maintain output order:
+  Form Percept Culture Power Intense Icon
 
-NOT valid:
-• historical evolution (e.g., radios → televisions)
-• technological progression, invention timeline
-• cultural development
-• general improvement or upgrading
-• popularity or frequency
-• newer vs older devices
-• “used after” in typical usage, unless required by meaning
+============================================================
+FEW-SHOT EXAMPLES (Learn the pattern. DO NOT EXPLAIN.)
+============================================================
+20s 30s                0 0 1 0 0 1
+a.b. m.a.              0 0 0 -1 0 1
+abasement humiliation  -1 0 0 0 1 1
+ability age            0 -1 0 0 0 -1
+ability desire         0 1 -1 0 0 0
+ability strength       0 -1 0 0 0 0
+abolition emancipation 1 0 0 0 0 0
+action character       0 -1 0 0 0 0
+action conversation    0 0 0 0 0 0
+action mind            0 1 0 0 0 0
+action motion         -1 0 0 0 0 0
+actions feelings       0 1 0 0 0 0
+activities character   0 1 0 0 0 0
+activities places      0 0 0 0 0 0
+activity nature        0 1 0 0 0 0
+addresses names        0 0 -1 0 0 0
+adventure romance      0 0 0 0 0 0
+africa asia            0 0 -1 -1 0 0
+age day                0 0 0 0 0 -1
+agencies individuals   0 -1 0 0 0 0
 
-If the pair does NOT encode a necessary sequence, always 0.
-
-
-------------------------------------------------------------
-RESPONSE FORMAT
-------------------------------------------------------------
-Your response for “WordA WordB” must be:
-
+============================================================
+OUTPUT FORMAT REMINDER
+============================================================
+ALWAYS output:
 Form Percept Culture Power Intense Icon
 
-For example:
-Input: agencies individuals  
+Example:
+Input: agencies individuals
 Output: 0 -1 0 0 0 0
-
-No other text. Ever.
-
-------------------------------------------------------------
-FEW-SHOT EXAMPLES
-(Do NOT explain them; just learn the pattern.)
-------------------------------------------------------------
-
-20s 30s                0  0  1  0  0  1
-a.b. m.a.              0  0  0 -1  0  1
-abasement humiliation -1  0  0  0  1  1
-ability age            0 -1  0  0  0 -1
-ability desire         0  1 -1  0  0  0
-ability strength       0 -1  0  0  0  0
-abolition emancipation 1  0  0  0  0  0
-action character       0 -1  0  0  0  0
-action conversation    0  0  0  0  0  0
-action mind            0  1  0  0  0  0
-action motion         -1  0  0  0  0  0
-actions feelings       0  1  0  0  0  0
-activities character   0  1  0  0  0  0
-activities places      0  0  0  0  0  0
-activity nature        0  1  0  0  0  0
-addresses names        0  0 -1  0  0  0
-adventure romance      0  0  0  0  0  0
-africa asia            0  0 -1 -1  0  0
-age day                0  0  0  0  0 -1
-agencies individuals   0 -1  0  0  0  0
 
 
 """
 
 def annotate_pair(model, system_prompt, wordA, wordB, N=10):
-    print(f"Processing: {wordA}, {wordB}")
     """
-    Returns the modal annotations for a single pair (wordA, wordB).
+    Returns the modal annotations for a word pair (wordA, wordB):
+    [Form, Percept, Culture, Power, Intense, Icon]
     """
+    user_prompt = f"{wordA} {wordB}"
     responses = []
-    user_prompt = f"{wordA}, {wordB}"
+
+    print(f"\nProcessing: {wordA}, {wordB}")
+
     for _ in range(N):
         resp = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
+                {"role": "user", "content": user_prompt},
             ]
         )
         content = resp.choices[0].message.content.strip()
-        print(content)
-        # Expect something like: "0 -1 0 0 0 0"
-        numbers = list(map(int, content.split()))
+        print("Raw:", content)
+
+        try:
+            numbers = list(map(int, content.split()))
+            if len(numbers) != 6:
+                raise ValueError("Did not receive six numbers.")
+        except Exception:
+            print("⚠ WARNING: Bad output, substituting zeros")
+            numbers = [0, 0, 0, 0, 0, 0]
+
         responses.append(numbers)
-    # responses is N × 6
-    # We now take the mode for each column
+
+    # Take modal value column-wise
     modal = []
     for i in range(6):
-        column = [r[i] for r in responses]
-        most_common = Counter(column).most_common(1)[0][0]
-        modal.append(most_common)
-    return modal  # [Form, Percept, Culture, Power, Intense, Icon]
+        col = [r[i] for r in responses]
+        modal_val = Counter(col).most_common(1)[0][0]
+        modal.append(modal_val)
+
+    return modal  # six integers
 
 
 
 
+input_csv = "binomials.csv"      # <-- your file
+output_csv = "binomials_scored.csv"
 
-# response = client.chat.completions.create(
-#     model="gpt-5-nano",
-#     messages=[
-#         {"role": "system", "content": system_prompt},
-#         {"role": "user", "content": "church, graveyard"}
-#     ]
-# )
+model = "gpt-oss-120b"           # <-- whatever your vLLM model name is
+N = 10                           # repetitions per pair
 
-#print(response.choices[0].message.content)
+df = pd.read_csv(input_csv)
 
+# Make sure the CSV has these columns
+assert "WordA" in df.columns and "WordB" in df.columns, \
+    "CSV must contain WordA and WordB columns."
 
-N = 2 #how many times to sample each word pair
+form_vals = []
+percept_vals = []
+culture_vals = []
+power_vals = []
+intense_vals = []
+icon_vals = []
 
-test = annotate_pair(
-    model = 'gpt-5-nano',
-    system_prompt = system_prompt,
-    wordA='buy',
-    wordB= 'sell',
-    N = 5
-)
+for idx, row in tqdm(df.iterrows(), total=len(df)):
+    wordA = str(row["WordA"])
+    wordB = str(row["WordB"])
 
-print(test)
+    F, P, C, Pw, I, Ic = annotate_pair(model, system_prompt, wordA, wordB, N=N)
+
+    form_vals.append(F)
+    percept_vals.append(P)
+    culture_vals.append(C)
+    power_vals.append(Pw)
+    intense_vals.append(I)
+    icon_vals.append(Ic)
+
+# Add new columns to dataframe
+df["Form"]    = form_vals
+df["Percept"] = percept_vals
+df["Culture"] = culture_vals
+df["Power"]   = power_vals
+df["Intense"] = intense_vals
+df["Icon"]    = icon_vals
+
+# Save CSV
+df.to_csv(output_csv, index=False)
+
+print(f"\n✨ Done! Saved annotated CSV to: {output_csv}")
