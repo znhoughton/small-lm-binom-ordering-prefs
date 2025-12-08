@@ -165,8 +165,19 @@ binoms_filtered = binoms_filtered %>%
   mutate(RelFreq = AlphaOrderFreq / TotalFreq,
          OverallFreq = log(TotalFreq))
 
-
 #write_csv(binoms_filtered, "../Data/fintetuning-binoms-without-constraints-coded.csv")
+
+binoms_with_genpref = read_csv('../Data/binomials_coded.csv') %>%
+  mutate(Freq = log(WordA_Unigram) - log(WordB_Unigram),
+         Len = Length,
+         '*BStress' = BStress)
+
+
+binoms_with_genpref = binoms_with_genpref %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals)))
+
+#write_csv(binoms_with_genpref, "../Data/fintetuning-binoms-with-constraints-coded.csv")
 
 ```
 
