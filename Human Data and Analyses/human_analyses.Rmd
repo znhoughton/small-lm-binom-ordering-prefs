@@ -275,3 +275,23 @@ finetuning_corpus_with_model_preds = finetuning_corpus_with_model_preds %>%
 #write_csv(finetuning_corpus_with_model_preds, '../Data/fintetuning-corpus-with-model-preds.csv')
 ```
 
+```{r}
+finetuning_corpus_with_model_preds_rel_freq = finetuning_corpus_with_model_preds %>%
+  select(-predicted_resp_value, -predicted_resp) %>%
+  group_by(item) %>%
+  mutate(RelFreqProb = RelFreq + 0.5) %>%
+  mutate(relfreq_resp_value = rbinom(n(), size = 1, prob = RelFreqProb)) %>%
+  ungroup() 
+
+
+finetuning_corpus_with_model_preds_rel_freq = finetuning_corpus_with_model_preds_rel_freq %>%
+  mutate(relfreq_resp = case_when(
+    relfreq_resp_value == 1 ~ paste0(WordA, ' and ', WordB),
+    relfreq_resp_value == 0 ~ paste0(WordB, ' and ', WordA)
+  ))
+
+
+#write_csv(finetuning_corpus_with_model_preds_rel_freq, '../Data/fintetuning-corpus-with-model-preds-relfreq.csv')
+```
+
+
