@@ -1642,3 +1642,100 @@ fixef(model_smolm1_novel_modelf)
 fixef(model_smolm2_novel_modelf)
 fixef(model_smolm3_novel_modelf)
 ```
+
+
+# Qing's model, all prompts
+
+```{r}
+corpus = read_csv('../Data/nonce_and_attested_binoms.csv')
+
+small_attested = read_csv('../Data/SMALL_MODEL_BINOMIAL_PREFERENCES.csv') %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = RelFreq - 0.5) %>%
+  mutate(OverallFreq = log(OverallFreq)) %>%
+  filter(Attested == 1) 
+
+
+
+small_novel = read_csv('../Data/SMALL_MODEL_BINOMIAL_PREFERENCES.csv') %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(OverallFreq = log(OverallFreq)) %>%
+  filter(Attested == 0)
+
+small_attested$prompt = factor(small_attested$prompt)
+small_novel$prompt = factor(small_novel$prompt)
+
+small_novel = small_novel %>%
+  rename(no_final_stress = "*BStress")
+
+small_attested = small_attested %>%
+  rename(no_final_stress = "*BStress")
+
+model_small_attested_genpref = brm(log_odds ~ GenPref + RelFreq + OverallFreq + GenPref:OverallFreq + RelFreq:OverallFreq + (GenPref | prompt) + (1 | Alpha),
+                       data = small_attested,
+                       #prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_small_attested_genpref'
+                      )
+
+
+model_small_novel_genpref = brm(log_odds ~ GenPref + (GenPref | prompt) + (1 | Alpha),
+                       data = small_novel,
+                       #prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_small_novel_genpref'
+                      )
+
+
+### Vif then backward model selection
+
+model_small_novel_individual_constraints = brm(log_odds ~ Culture + Power + Freq + Len + no_final_stress + Intense + Percept + Lapse + (Culture + Power + Freq + Len + no_final_stress + Intense + Percept + Lapse | prompt) + ( 1 | Alpha),
+                       data = small_novel,
+                       #prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_small_novel_individual_constraints'
+                      )
+ 
+
+fixef(model_small_attested_genpref)
+fixef(model_small_novel_genpref)
+fixef(model_small_novel_individual_constraints)
+car::vif(model_small_attested_individual_constraints)
+
+
+## Now we do backward model selection? For this project we might actually want to *not* do backward model selection, because constraints that are centered around zero may change after finetuning.
+
+
+```
+

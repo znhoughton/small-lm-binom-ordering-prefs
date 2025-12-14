@@ -113,20 +113,61 @@ def get_model_prefs(prompt, prompt_value, model_name, tokenizer_name):
 #  MAIN LOOP
 # ==========================================================
 list_of_prompts = [
-    'This next phrase must be formed compositionally: ',
-    'Next item: ',
-    'example: ',
-    'instance: ',
-    'try this: ',
-    ''
+    "Well, ",
+    "So, ",
+    "Then ",
+    "Possibly ",
+    "Or even ",
+    "Maybe a ",
+    "Perhaps a ",
+    "At times ",
+    "Suddenly, the ",
+    "Honestly just ",
+    "Especially the ",
+    "For instance ",
+    "In some cases ",
+    "Every now and then ",
+    "Occasionally you’ll find ",
+    "There can be examples like ",
+    "You might notice things like ",
+    "People sometimes mention ",
+    "Sometimes just ",
+    "Nothing specific comes to mind except the ",
+    "It reminded me loosely of the ",
+    "There was a vague reference to the ",
+    "Unexpectedly the ",
+    "It’s easy to overlook the ",
+    "There used to be talk of ",
+    "Out in the distance was the ",
+    "What puzzled everyone was the ",
+    "At some point I overheard ",
+    "Without warning came ",
+    "A friend once described the ",
+    "The scene shifted toward ",
+    "Nobody expected to hear about ",
+    "Things eventually turned toward ",
+    "The conversation eventually returned to ",
+    "I only remember a hint of the ",
+    "I couldn’t quite place the ",
+    "It somehow led back to the ",
+    "What stood out most was the ",
+    "The oddest part involved the ",
+    "Later on, people were discussing ",
+    "There was this fleeting idea about ",
+    "I once heard someone bring up the ",
+    "There was a moment involving the ",
+    "It all started when we noticed the ",
+    "Another example floated around concerning the ",
+    "I came across something about the ",
+    "A situation arose involving the ",
+    "The conversation drifted toward the ",
+    "At one point we ended up discussing ",
+    "Out of nowhere came a mention of the "
 ]
 
 def main():
     model_names = [
-        'gpt2-xl',
-        'kanishka/smolm-autoreg-bpe-babylm-1e-3',
-        'kanishka/smolm-autoreg-bpe-babylm-seed_211-1e-3',
-        'kanishka/smolm-autoreg-bpe-babylm-seed_1024-1e-3'
+        'qing-yao/binomial-babylm-base_seed-42_1e-3'
     ]
 
     all_results = []
@@ -147,7 +188,7 @@ def main():
     #  SAVE MASTER CSV
     # ================================================
     final_df = pd.concat(all_results, ignore_index=True)
-    out_path = '../Data/ALL_MODELS_ALL_PROMPTS_BINOMIAL_PREFERENCES.csv'
+    out_path = '../Data/SMALL_MODEL_BINOMIAL_PREFERENCES.csv'
     #change to ALL_MODELS_ALL_PROMPTS.csv when just want nonce binoms
     final_df.to_csv(out_path, index=False)
 
