@@ -219,6 +219,7 @@ nonce_data = nonce_data %>%
 
 nonce_data = nonce_data %>%
   mutate(participant = ResponseId, resp = Answer, RelFreq = 0, Attested = 1) %>%
+  mutate(raw_resp = resp, resp = ifelse(raw_resp == Alpha, 'alpha', 'nonalpha')) %>%
   select(participant, resp, Word1, Word2, Alpha, Nonalpha, OverallFreq, Word1_freq, Word2_freq, Form, Percept, Culture, Power, Intense, Icon, Freq, Len, Lapse, "*BStress", RelFreq, GenPref, Attested)
 
 human_data = human_data %>%

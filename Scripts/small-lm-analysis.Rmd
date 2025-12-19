@@ -1647,7 +1647,23 @@ fixef(model_smolm3_novel_modelf)
 # Qing's model, all prompts
 
 ```{r}
+options(contrasts = c("contr.sum","contr.sum"))
+
 corpus = read_csv('../Data/nonce_and_attested_binoms.csv')
+
+baseline_model_data = read_csv('../Data/SMALL_MODEL_BINOMIAL_PREFERENCES.csv') %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = RelFreq - 0.5) %>%
+  ungroup()
+
 
 small_attested = read_csv('../Data/SMALL_MODEL_BINOMIAL_PREFERENCES.csv') %>%
   mutate(log_odds = preference) %>%
@@ -1660,9 +1676,9 @@ small_attested = read_csv('../Data/SMALL_MODEL_BINOMIAL_PREFERENCES.csv') %>%
   mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
   mutate(GenPref = GenPref - 0.5) %>%
   mutate(RelFreq = RelFreq - 0.5) %>%
-  mutate(OverallFreq = log(OverallFreq)) %>%
-  filter(Attested == 1) 
-
+  ungroup() %>%
+  filter(Attested == 1) %>%
+  mutate(CenteredOverallFreq = scale(log(OverallFreq))) 
 
 
 small_novel = read_csv('../Data/SMALL_MODEL_BINOMIAL_PREFERENCES.csv') %>%
@@ -1675,7 +1691,6 @@ small_novel = read_csv('../Data/SMALL_MODEL_BINOMIAL_PREFERENCES.csv') %>%
   mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
   mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
   mutate(GenPref = GenPref - 0.5) %>%
-  mutate(OverallFreq = log(OverallFreq)) %>%
   filter(Attested == 0)
 
 small_attested$prompt = factor(small_attested$prompt)
@@ -1687,7 +1702,7 @@ small_novel = small_novel %>%
 small_attested = small_attested %>%
   rename(no_final_stress = "*BStress")
 
-model_small_attested_genpref = brm(log_odds ~ GenPref + RelFreq + OverallFreq + GenPref:OverallFreq + RelFreq:OverallFreq + (GenPref | prompt) + (1 | Alpha),
+model_small_attested_genpref = brm(log_odds ~ GenPref + RelFreq + CenteredOverallFreq + GenPref:CenteredOverallFreq + RelFreq:CenteredOverallFreq + (GenPref | prompt) + (1 | Alpha),
                        data = small_attested,
                        #prior = prior_probs,
                        iter = 10000,
@@ -1695,7 +1710,7 @@ model_small_attested_genpref = brm(log_odds ~ GenPref + RelFreq + OverallFreq + 
                        chains = 4,
                        cores = 4,
                        #control = list(adapt_delta=0.99, max_treedepth = 15),
-                       #control = list(max_treedepth = 20),
+                       control = list(max_treedepth = 20),
                        file = '../Data/model_small_attested_genpref'
                       )
 
@@ -1731,11 +1746,473 @@ model_small_novel_individual_constraints = brm(log_odds ~ Culture + Power + Freq
 fixef(model_small_attested_genpref)
 fixef(model_small_novel_genpref)
 fixef(model_small_novel_individual_constraints)
-car::vif(model_small_attested_individual_constraints)
+#car::vif(model_small_novel_individual_constraints)
 
 
 ## Now we do backward model selection? For this project we might actually want to *not* do backward model selection, because constraints that are centered around zero may change after finetuning.
 
 
 ```
+
+# Finetuning on GenPref
+
+
+
+```{r}
+options(contrasts = c("contr.sum","contr.sum"))
+
+corpus = read_csv('../Data/nonce_and_attested_binoms.csv')
+
+model_results_genpref = read_csv('../Data/FINETUNED_GENPREF_MODEL_BINOMIAL_PREFERENCES.csv') %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = RelFreq - 0.5) %>%
+  ungroup() 
+
+
+model_results_genpref$prompt = factor(model_results_genpref$prompt)
+
+model_results_genpref = model_results_genpref %>%
+  rename(no_final_stress = "*BStress")
+
+
+
+small_attested_genpref = model_results_genpref %>%
+  filter(Attested == 1) %>%
+  mutate(CenteredOverallFreq = scale(log(OverallFreq))) 
+
+small_novel_genpref = model_results_genpref %>%
+  filter(Attested == 0)
+
+small_attested_genpref$prompt = factor(small_attested_genpref$prompt)
+small_novel_genpref$prompt = factor(small_novel_genpref$prompt)
+```
+
+```{r}
+
+######################################################################################
+######################################################################################
+## we'll come back to running these models once we have found the best language model 
+######################################################################################
+######################################################################################
+
+
+model_small_attested_genpref_finetuned = brm(log_odds ~ (GenPref + RelFreq + CenteredOverallFreq + GenPref:CenteredOverallFreq + RelFreq:CenteredOverallFreq) * model + (GenPref | prompt) + (1 | Alpha),
+                       data = small_attested_genpref,
+                       #prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       control = list(max_treedepth = 20),
+                       file = '../Data/model_small_attested_genpref_finetuned'
+                      )
+
+
+model_small_novel_genpref_finetuned = brm(log_odds ~ GenPref * model + (GenPref * model | prompt) + (1 | Alpha),
+                       data = small_novel_genpref,
+                       #prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_small_novel_genpref_finetuned'
+                      )
+
+
+### Vif then backward model selection
+
+model_small_novel_individual_constraints_finetuned = brm(log_odds ~ Culture + Power + Freq + Len + no_final_stress + Intense + Percept + Lapse + (Culture + Power + Freq + Len + no_final_stress + Intense + Percept + Lapse | prompt) + ( 1 | Alpha),
+                       data = small_novel_genpref,
+                       #prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_small_novel_individual_constraints_finetuned'
+                      )
+ 
+
+fixef(model_small_attested_genpref_finetuned)
+fixef(model_small_novel_genpref_finetuned)
+fixef(model_small_novel_individual_constraints)
+#car::vif(model_small_novel_individual_constraints_finetuned)
+
+
+library(dplyr)
+library(tidyr)
+
+df_item_model <- model_results_genpref %>%
+  full_join(baseline_model_data) #%>%
+  group_by(Alpha, model) %>%
+  summarise(
+    log_odds = mean(log_odds, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+library(tidyr)
+
+df_wide <- df_item_model %>%
+  pivot_wider(
+    names_from  = model,
+    values_from = log_odds
+  )
+
+
+cor_mat <- df_wide %>%
+  select(-Alpha) %>%
+  cor(use = "pairwise.complete.obs")
+
+```
+
+```{r}
+
+# all_human_data = nonce_data
+all_human_data = read_csv('../Human Data and Analyses/all_human_data.csv') %>%
+  mutate(Attested = ifelse(
+    OverallFreq == 0, 0, 1
+  )) %>%
+  select(participant, resp, Word1, Word2, Alpha, Nonalpha, OverallFreq, Word1_freq, Word2_freq, Form, Percept, Culture, Power, Intense, Icon, Freq, Len, Lapse, "*BStress", RelFreq, GenPref, Attested) %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5)
+
+all_human_data = all_human_data %>%
+  mutate(resp_binary = case_when(
+    resp == 'alpha' ~ 1,
+    resp == 'nonalpha' ~ 0
+  ))
+
+
+#   filter(Attested == 0) 
+# 
+# small_novel_genpref_item_preds = brm(log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+#                        data = small_novel_genpref,
+#                        #prior = prior_probs,
+#                        iter = 6000,
+#                        warmup = 3000,
+#                        chains = 4,
+#                        cores = 4,
+#                        #control = list(adapt_delta=0.99, max_treedepth = 15),
+#                        #control = list(max_treedepth = 20),
+#                        file = '../Data/small_novel_genpref_item_preds'
+#                       )
+
+prior_probs <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha"),
+  prior(student_t(3, 0, 1), class = "sd", group = "prompt"),
+  prior(student_t(3, 0, 1), class = "sigma")
+)
+
+#now let's sample 100 binomials/items
+item_list = unique(baseline_model_data$Alpha)
+#set.seed(42)
+sampled_items = item_list #we can replace this with simply "sampled_items = item_list" later when we want to run the full thing
+
+baseline_model_data = baseline_model_data %>% 
+  filter(Alpha %in% sampled_items) 
+
+baseline_item_preds = brm(log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+                       data = baseline_model_data,
+                       prior = prior_probs,
+                       iter =  10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/baseline_item_preds'
+                      )
+
+
+newdata = data.frame(
+  Alpha = unique(baseline_model_data$Alpha),
+  prompt = NA
+)
+
+# fitA = fitted(
+#   small_novel_genpref_item_preds,
+#   newdata = newdata,
+#   re_formula = ~ (1 | Alpha),
+#   summary = TRUE
+# )
+# 
+# item_df_genpref = data.frame(
+#   Alpha = newdata$Alpha,
+#   item_logodds_genpref = fitA[, "Estimate"],
+#   item_lo_genpref      = fitA[, "Q2.5"],
+#   item_hi_genpref      = fitA[, "Q97.5"]
+# )
+
+fitB = fitted(
+  baseline_item_preds,
+  newdata = newdata,
+  re_formula = ~(1 | Alpha),
+  summary = TRUE
+)
+
+item_df_baseline = data.frame(
+  Alpha = newdata$Alpha,
+  item_logodds_baseline = fitB[, "Estimate"],
+  item_lo_baseline      = fitB[, "Q2.5"],
+  item_hi_baseline      = fitB[, "Q97.5"]
+)
+
+
+
+
+human_data = all_human_data %>%
+  left_join(item_df_baseline, by = 'Alpha') %>%
+  filter(Alpha %in% sampled_items)
+
+test = human_data %>%
+  filter(is.na(resp))
+
+nrow(test)
+nrow(human_data)
+
+prior_probs2 <- c(
+  # Fixed effects
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "item_logodds_baseline"),
+
+  # Random-effect standard deviations
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+
+
+human_data_baseline = brm(
+  resp_binary ~ item_logodds_baseline + (1 | participant) + (1 | Alpha),
+  data = human_data,
+  family = bernoulli(link = "logit"),
+  chains = 4,   
+  cores = 4,
+  iter = 6000,  
+  warmup = 3000,
+  save_pars = save_pars(all = TRUE),
+  prior = prior_probs2,
+  #control = list(adapt_delta=0.99, max_treedepth = 20),
+  file = '../Data/human_data_baseline'
+)
+# 
+# human_data_genpref = brm(
+#   resp_binary ~ item_logodds_genpref + (1 | participant) + (1 | Alpha),
+#   data = human_data,
+#   family = bernoulli(link = "logit"),
+#   chains = 4,   
+#   cores = 4,
+#   iter = 6000,  
+#   warmup = 3000,
+#   save_pars = save_pars(all = TRUE),
+#   #prior = prior_probs,
+#   #control = list(adapt_delta=0.99, max_treedepth = 20),
+#   file = '../Data/human_data_genpref'
+# )
+
+human_data_baseline = add_criterion(human_data_baseline, 'loo')
+#human_data_genpref = add_criterion(human_data_genpref, 'loo')
+
+# loo_results = data.frame(loo_compare(
+#   human_data_baseline,
+#   human_data_genpref
+# ))
+
+#loo_results
+
+```
+
+## Testing multiple genpref models
+
+```{r}
+# 
+# template_item_model <- brm(
+#   log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+#   data = df_genpref,   # any representative dataset
+#   prior = prior_probs,
+#   iter = 1000,
+#   warmup = 5000,
+#   chains = 4,
+#   cores = 4,
+#   backend = "cmdstanr",
+#   file = "../Data/template_genpref_item_model"
+# )
+# 
+# template_human_model <- brm(
+#   resp_binary ~ item_logodds_genpref + (1 | participant) + (1 | Alpha),
+#   data = human_data_model,
+#   family = bernoulli(link = "logit"),
+#   prior = prior_probs2,
+#   chains = 4,
+#   cores = 4,
+#   iter = 6000,
+#   warmup = 3000,
+#   backend = "cmdstanr",
+#   save_pars = save_pars(all = TRUE),
+#   file = "../Data/template_human_model"
+# )
+
+
+library(purrr)
+
+run_genpref_pipeline <- function(df_genpref, model_name) {
+
+  message("Running model: ", model_name)
+  
+  df_genpref = df_genpref %>%
+    filter(Alpha %in% sampled_items)
+  # --------------------------------------------------
+  # Item-level model
+  # --------------------------------------------------
+  safe_model_name <- gsub("[^A-Za-z0-9_]", "_", model_name)
+  item_model <- update(
+    baseline_item_preds,
+    newdata = df_genpref,
+    recompile = FALSE,
+    chains = 4,
+    cores = 4,
+    file = paste0("../Data/genpref_item_preds_", safe_model_name)
+  )
+
+
+  newdata <- data.frame(
+    Alpha = unique(df_genpref$Alpha),
+    prompt = NA
+  )
+
+  fitA <- fitted(
+    item_model,
+    newdata = newdata,
+    re_formula = ~ (1 | Alpha),
+    summary = TRUE
+  )
+
+  item_df_genpref <- data.frame(
+    Alpha = newdata$Alpha,
+    item_logodds_genpref = fitA[, "Estimate"],
+    item_lo_genpref      = fitA[, "Q2.5"],
+    item_hi_genpref      = fitA[, "Q97.5"]
+  )
+
+  # --------------------------------------------------
+  # Join with human data
+  # --------------------------------------------------
+  human_data_model <- all_human_data %>%
+    left_join(item_df_baseline, by = "Alpha") %>%
+    left_join(item_df_genpref, by = "Alpha") %>%
+    filter(Alpha %in% sampled_items)
+
+
+  # --------------------------------------------------
+  # Human-level model
+  # --------------------------------------------------
+  human_model <- update(
+    human_data_baseline,
+    newdata = human_data_model,
+    recompile = FALSE,
+    chains = 4, 
+    cores = 4,
+    file = paste0("../Data/human_data_genpref_", safe_model_name)
+  )
+
+
+  human_model <- add_criterion(human_model, "loo")
+ 
+   
+  col_name <- paste0("item_logodds_genpref_", safe_model_name)
+
+  human_data_model <- human_data_model %>%
+    rename(!!col_name := item_logodds_genpref)
+
+  # --------------------------------------------------
+  # LOO comparison
+  # --------------------------------------------------
+  loo_df <- data.frame(
+    loo_compare(
+      human_data_baseline,
+      human_model
+    )
+  )
+
+  loo_df$model <- model_name
+  list(
+  model = model_name,
+  loo = loo_df,
+  human_data = human_data_model %>%
+    select(
+      participant, resp, Word1, Word2, Alpha, Nonalpha,
+      OverallFreq, Word1_freq, Word2_freq,
+      Form, Percept, Culture, Power, Intense, Icon,
+      Freq, Len, Lapse, "*BStress", RelFreq, GenPref, Attested,
+      item_logodds_baseline,
+      all_of(col_name),
+      resp_binary
+    )
+)
+
+}
+
+results <- model_results_genpref %>%
+  split(.$model) %>%
+  imap(~ run_genpref_pipeline(.x, .y))
+
+
+loo_results_all <- bind_rows(map(results, "loo"))
+loo_results_all
+
+
+human_data_wide <- reduce(
+  map(results, "human_data"),
+  left_join,
+  by = c(
+    "participant", "resp", "Word1", "Word2", "Alpha", "Nonalpha",
+    "OverallFreq", "Word1_freq", "Word2_freq",
+    "Form", "Percept", "Culture", "Power", "Intense", "Icon",
+    "Freq", "Len", "Lapse", "*BStress", "RelFreq", "GenPref", "Attested",
+    "item_logodds_baseline", "resp_binary"
+  )
+)
+
+```
+
+```{r}
+
+human_model = brm(
+  resp_binary ~ item_logodds_baseline + (1 | participant) + (1 | Alpha),
+  data = human_data,
+  family = bernoulli(link = "logit"),
+  chains = 4,   
+  cores = 4,
+  iter = 6000,  
+  warmup = 3000,
+  save_pars = save_pars(all = TRUE),
+  prior = prior_probs2,
+  #control = list(adapt_delta=0.99, max_treedepth = 20),
+  file = '../Data/human_data_genpref_qing_yao_genfreq_finetuned_ep10_seed_42_1e_4.rds'
+)
+
+test_loo = data.frame(
+    loo_compare(
+      human_data_baseline,
+      human_model
+    )
+  )
+```
+
+
+## Expansive Analyses now that we have selected a model
 
