@@ -170,9 +170,12 @@ def main():
     lrs = ["3e-5", "5e-5", "1e-4"]
 
     model_names = [
-        f"qing-yao/genfreq-finetuned-ep{epoch}_seed-42_{lr}" #base model is qing-yao/binomial-babylm-base_seed-42_1e-3
-        for epoch in epochs
-        for lr in lrs
+        #f"qing-yao/genfreq-finetuned-ep{epoch}_seed-42_{lr}" #base model is qing-yao/binomial-babylm-base_seed-42_1e-3
+        #for epoch in epochs
+        #for lr in lrs
+        #"qing-yao/relfreq-finetuned-ep10_seed-42_1e-4"
+        "qing-yao/genfreq-finetuned-ep1_seed-42_1e-4"
+        #"qing-yao/genfreq-finetuned_seed-42_5e-5"
     ]
 
     all_results = []
@@ -193,7 +196,7 @@ def main():
     #  SAVE MASTER CSV
     # ================================================
     final_df = pd.concat(all_results, ignore_index=True)
-    out_path = '../Data/FINETUNED_GENPREF_MODEL_BINOMIAL_PREFERENCES.csv'
+    out_path = '../Data/FINETUNED_GENPREF_1EPOCH_MODEL_BINOMIAL_PREFERENCES.csv'
     #change to ALL_MODELS_ALL_PROMPTS.csv when just want nonce binoms
     final_df.to_csv(out_path, index=False)
 

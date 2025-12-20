@@ -11,1640 +11,9 @@ library(tidyverse)
 library(brms)
 ```
 
-# Prompt 1: "This next phrase must be formed compositionally: "
+# Genpref and Individual Constraint Analyses
 
-## Prep Data
-
-Read in our model data
-
-```{r}
-corpus = read_csv('../Data/nonce_and_attested_binoms.csv')
-
-model_smolm1 = read_csv('../Data/0-smolm-autoreg-bpe-babylm-1e-3_binom_ordering_prefs.csv') %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
-  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
-  select(-and) %>%
-  #mutate(across(2:3, tolower)) %>%
-  left_join(corpus) %>%
-  mutate(checkpoint = 'main') %>%
-  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
-  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
-  mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
-                             Attested == 0 ~ 0)) %>%
-  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
-  
-model_smolm2 = read_csv('../Data/0-smolm-autoreg-bpe-babylm-seed_211-1e-3_binom_ordering_prefs.csv') %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
-  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
-  select(-and) %>%
-  #mutate(across(2:3, tolower)) %>%
-  left_join(corpus) %>%
-  mutate(checkpoint = 'main') %>%
-  mutate(y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
-  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
-  mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
-                             Attested == 0 ~ 0)) %>%
-  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
-  
-
-model_smolm3 = read_csv('../Data/0-smolm-autoreg-bpe-babylm-seed_1024-1e-3_binom_ordering_prefs.csv') %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
-  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
-  select(-and) %>%
-  #mutate(across(2:3, tolower)) %>%
-  left_join(corpus) %>%
-  mutate(checkpoint = 'main') %>%
-  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
-  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
-  mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
-                             Attested == 0 ~ 0)) %>%
-  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
-  
-
-model_smolm1 = model_smolm1 %>%
-  rename(no_final_stress = `*BStress`)
-
-model_smolm2 = model_smolm2 %>%
-  rename(no_final_stress = `*BStress`)
-
-model_smolm3 = model_smolm3 %>%
-  rename(no_final_stress = `*BStress`)
-```
-
-```{r}
-
-model_smolm1_attested = model_smolm1 %>%
-  filter(Attested == 1)
-
-model_smolm1_novel = model_smolm1 %>%
-  filter(Attested == 0)
-
-model_smolm2_attested = model_smolm2 %>%
-  filter(Attested == 1)
-
-model_smolm2_novel = model_smolm2 %>%
-  filter(Attested == 0)
-
-model_smolm3_attested = model_smolm3 %>%
-  filter(Attested == 1)
-
-model_smolm3_novel = model_smolm3 %>%
-  filter(Attested == 0)
-
-#bigram_counts = read_csv('../Data/olmo_bigram_freqs.csv')
-#onegram_corpus_size = 1560674367427
-#count_and = 43378012800
-
-#bigram_counts = bigram_counts %>%
-  #mutate(ngram = str_replace_all(ngram, '\t', ' '))
-# 
-# data_main_model = data_main_model %>%
-#   mutate(bigram1_alpha = paste0(Word1, ' and'),
-#          bigram2_alpha = paste0('and ', Word2),
-#          bigram1_nonalpha = paste0(Word2, ' and'),
-#          bigram2_nonalpha = paste0('and ', Word1)
-#          )
-# 
-# data_main_model = data_main_model %>%
-#   left_join(bigram_counts, by = c('bigram1_alpha' = 'ngram')) %>%
-#   rename(count_bigram1_alpha = count) %>%
-#   left_join(bigram_counts, by = c('bigram2_alpha' = 'ngram')) %>%
-#   rename(count_bigram2_alpha = count) %>%
-#   left_join(bigram_counts, by = c('bigram1_nonalpha' = 'ngram')) %>%
-#   rename(count_bigram1_nonalpha = count) %>%
-#   left_join(bigram_counts, by = c('bigram2_nonalpha' = 'ngram')) %>%
-#   rename(count_bigram2_nonalpha = count) %>%
-#   mutate(corpus_size = onegram_corpus_size) %>%
-#   mutate(count_and = count_and)
-
-# 
-# data_main_model = data_main_model %>%
-#   mutate(bigram_prob_alpha = (Word1_freq / corpus_size) * (count_bigram1_alpha / Word1_freq) * (count_bigram2_alpha / count_and),
-#          bigram_prob_nonalpha = (Word2_freq / corpus_size) * (count_bigram1_nonalpha / Word2_freq) * (count_bigram2_nonalpha / count_and),
-#          log_bigram_prob_alpha = log(bigram_prob_alpha),
-#          log_bigram_prob_nonalpha = log(bigram_prob_nonalpha),
-#          log_bigram_odds_ratio = log_bigram_prob_alpha - log_bigram_prob_nonalpha)
-#
-```
-
-## Analyses
-
-### Attested Binomials
-
-```{r}
-options(contrasts = c("contr.sum","contr.sum"))
-prior_probs = c(
-  prior(student_t(3, 0, 1), class = 'Intercept'),
-  prior(student_t(3, 0, 1), class = 'sigma'),
-  prior(student_t(3, 0, 1), class = 'b')
-)
-model_smolm1_full_df = model_smolm1 
-#model_smolm1_full_df$GenPref = scale(model_smolm1_full_df$GenPref)[,1]
-#model_smolm1_full_df$RelFreq = scale(model_smolm1_full_df$RelFreq)[,1]
-#model_smolm1_full_df$LogCenteredOverallFreq = scale(log(model_smolm1_full_df$OverallFreq + 0.000000001))[,1]
-
-
-model_smolm1_full = brm(log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
-                       data = model_smolm1_full_df,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm1_full'
-                      )
-
-model_smolm1_full_df = model_smolm1
-model_smolm1_full_df$LogOverallFreq = scale(log(model_smolm1_full_df$OverallFreq + 1))[,1]
-
-model_smolm1_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
-                       data = model_smolm1_full_df,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm1_full_log_overall_freq_scaled'
-                      )
-
-
-
-model_smolm2_full_df = model_smolm2
-model_smolm2_full_df$LogOverallFreq = scale(log(model_smolm2_full_df$OverallFreq + 1))[,1]
-
-model_smolm2_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
-                       data = model_smolm2_full_df,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm2_full_log_overall_freq_scaled'
-                      )
-
-
-
-model_smolm3_full_df = model_smolm3
-model_smolm3_full_df$LogOverallFreq = scale(log(model_smolm3_full_df$OverallFreq + 1))[,1]
-
-model_smolm3_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
-                       data = model_smolm3_full_df,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm3_full_log_overall_freq_scaled'
-                      )
-
-
-
-
-fixef(model_smolm1_full_log_overall_freq_scaled)
-fixef(model_smolm2_full_log_overall_freq_scaled)
-fixef(model_smolm3_full_log_overall_freq_scaled)
-
-
-model_smolm1_attested$LogOverallFreq = scale(log(model_smolm1_attested$OverallFreq))
-
-model_smolm1_attested_model = brm( log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
-                       data = model_smolm1_attested,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm1_attested_model'
-                      )
-
-
-model_smolm2_attested$LogOverallFreq = scale(log(model_smolm2_attested$OverallFreq))
-
-model_smolm2_attested_model = brm( log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
-                       data = model_smolm2_attested,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm2_attested_model'
-                      )
-
-model_smolm3_attested$LogOverallFreq = scale(log(model_smolm3_attested$OverallFreq))
-
-model_smolm3_attested_model = brm( log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
-                       data = model_smolm3_attested,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm3_attested_model'
-                      )
-
-
-fixef(model_smolm1_attested_model)
-fixef(model_smolm2_attested_model)
-fixef(model_smolm3_attested_model)
-```
-
-### Novel Binomials
-
-```{r}
-options(contrasts = c("contr.sum","contr.sum"))
-prior_probs = c(
-  prior(student_t(3, 0, 1), class = 'Intercept'),
-  prior(student_t(3, 0, 1), class = 'sigma'),
-  prior(student_t(3, 0, 1), class = 'b')
-)
-
-
-model_smolm1_novel_model = brm(log_odds ~ GenPref,
-                       data = model_smolm1_novel,
-                       prior = prior_probs,
-                       iter = 6000,
-                       warmup = 3000,
-                       chains = 4,
-                       cores = 4,
-                       #control = list(adapt_delta=0.99, max_treedepth = 15),
-                       #control = list(max_treedepth = 20),
-                       file = '../Data/model_smolm1_novel_model'
-                      )
-
-model_smolm2_novel_model = brm(log_odds ~ GenPref,
-                       data = model_smolm2_novel,
-                       prior = prior_probs,
-                       iter = 6000,
-                       warmup = 3000,
-                       chains = 4,
-                       cores = 4,
-                       #control = list(adapt_delta=0.99, max_treedepth = 15),
-                       #control = list(max_treedepth = 20),
-                       file = '../Data/model_smolm2_novel_model'
-                      )
-
-model_smolm3_novel_model = brm(log_odds ~ GenPref,
-                       data = model_smolm3_novel,
-                       prior = prior_probs,
-                       iter = 6000,
-                       warmup = 3000,
-                       chains = 4,
-                       cores = 4,
-                       #control = list(adapt_delta=0.99, max_treedepth = 15),
-                       #control = list(max_treedepth = 20),
-                       file = '../Data/model_smolm3_novel_model'
-                      )
-
-fixef(model_smolm1_novel_model)
-fixef(model_smolm2_novel_model)
-fixef(model_smolm3_novel_model)
-
-
-
-ce <- conditional_effects(model_smolm1_novel_model, effects = "GenPref",
-                          re_formula = NA)   # fixed effects only
-p = plot(ce, points = TRUE)
-p[[1]] + theme_bw()
-
-
-
-model_smolm1_novel_model_test = brm(log_odds ~ scale(GenPref),
-                       data = model_smolm1_novel,
-                       prior = prior_probs,
-                       iter = 6000,
-                       warmup = 3000,
-                       chains = 4,
-                       cores = 4,
-                       #control = list(adapt_delta=0.99, max_treedepth = 15),
-                       #control = list(max_treedepth = 20),
-                       file = '../Data/model_smolm1_novel_model_test2'
-                      )
-
-fixef(model_smolm1_novel_model_test)
-ce <- conditional_effects(model_smolm1_novel_model_test, effects = "GenPref",
-                          re_formula = NA)   # fixed effects only
-p = plot(ce, points = TRUE)
-p[[1]] + 
-  theme_bw() +
-  xlab('Abstract Preferences') +
-  ylab('Log Odds Alphabetical to Nonalphabetical') +
-  theme(axis.title.x = element_text(size = 14),
-        axis.title.y = element_text(size = 14)) 
-
-```
-
-# Prompt 2: "Next item: "
-
-## Prep Data
-
-Read in our model data
-
-```{r}
-
-model_smolm1b = read_csv('../Data/1-smolm-autoreg-bpe-babylm-1e-3_binom_ordering_prefs.csv') %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
-  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
-  select(-and) %>%
-  #mutate(across(2:3, tolower)) %>%
-  left_join(corpus) %>%
-  mutate(checkpoint = 'main') %>%
-  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
-  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
-  mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
-                             Attested == 0 ~ 0)) %>%
-  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
-  
-model_smolm2b = read_csv('../Data/1-smolm-autoreg-bpe-babylm-seed_211-1e-3_binom_ordering_prefs.csv') %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
-  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
-  select(-and) %>%
-  #mutate(across(2:3, tolower)) %>%
-  left_join(corpus) %>%
-  mutate(checkpoint = 'main') %>%
-  mutate(y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
-  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
-  mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
-                             Attested == 0 ~ 0)) %>%
-  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
-  
-
-model_smolm3b = read_csv('../Data/1-smolm-autoreg-bpe-babylm-seed_1024-1e-3_binom_ordering_prefs.csv') %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
-  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
-  select(-and) %>%
-  #mutate(across(2:3, tolower)) %>%
-  left_join(corpus) %>%
-  mutate(checkpoint = 'main') %>%
-  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
-  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
-  mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
-                             Attested == 0 ~ 0)) %>%
-  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
-  
-
-model_smolm1b = model_smolm1b %>%
-  rename(no_final_stress = `*BStress`)
-
-model_smolm2b = model_smolm2b %>%
-  rename(no_final_stress = `*BStress`)
-
-model_smolm3b = model_smolm3b %>%
-  rename(no_final_stress = `*BStress`)
-```
-
-```{r}
-
-model_smolm1_attestedb = model_smolm1b %>%
-  filter(Attested == 1)
-
-model_smolm1_novelb = model_smolm1b %>%
-  filter(Attested == 0)
-
-model_smolm2_attestedb = model_smolm2b %>%
-  filter(Attested == 1)
-
-model_smolm2_novelb = model_smolm2b %>%
-  filter(Attested == 0)
-
-model_smolm3_attestedb = model_smolm3b %>%
-  filter(Attested == 1)
-
-model_smolm3_novelb = model_smolm3b %>%
-  filter(Attested == 0)
-
-#bigram_counts = read_csv('../Data/olmo_bigram_freqs.csv')
-#onegram_corpus_size = 1560674367427
-#count_and = 43378012800
-
-#bigram_counts = bigram_counts %>%
-  #mutate(ngram = str_replace_all(ngram, '\t', ' '))
-# 
-# data_main_model = data_main_model %>%
-#   mutate(bigram1_alpha = paste0(Word1, ' and'),
-#          bigram2_alpha = paste0('and ', Word2),
-#          bigram1_nonalpha = paste0(Word2, ' and'),
-#          bigram2_nonalpha = paste0('and ', Word1)
-#          )
-# 
-# data_main_model = data_main_model %>%
-#   left_join(bigram_counts, by = c('bigram1_alpha' = 'ngram')) %>%
-#   rename(count_bigram1_alpha = count) %>%
-#   left_join(bigram_counts, by = c('bigram2_alpha' = 'ngram')) %>%
-#   rename(count_bigram2_alpha = count) %>%
-#   left_join(bigram_counts, by = c('bigram1_nonalpha' = 'ngram')) %>%
-#   rename(count_bigram1_nonalpha = count) %>%
-#   left_join(bigram_counts, by = c('bigram2_nonalpha' = 'ngram')) %>%
-#   rename(count_bigram2_nonalpha = count) %>%
-#   mutate(corpus_size = onegram_corpus_size) %>%
-#   mutate(count_and = count_and)
-
-# 
-# data_main_model = data_main_model %>%
-#   mutate(bigram_prob_alpha = (Word1_freq / corpus_size) * (count_bigram1_alpha / Word1_freq) * (count_bigram2_alpha / count_and),
-#          bigram_prob_nonalpha = (Word2_freq / corpus_size) * (count_bigram1_nonalpha / Word2_freq) * (count_bigram2_nonalpha / count_and),
-#          log_bigram_prob_alpha = log(bigram_prob_alpha),
-#          log_bigram_prob_nonalpha = log(bigram_prob_nonalpha),
-#          log_bigram_odds_ratio = log_bigram_prob_alpha - log_bigram_prob_nonalpha)
-#
-```
-
-## Analyses
-
-### Attested Binomials
-
-```{r}
-
-
-model_smolm1b_full_df = model_smolm1b
-model_smolm1b_full_df$LogOverallFreq = scale(log(model_smolm1b_full_df$OverallFreq + 1))[,1]
-
-model_smolm1b_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
-                       data = model_smolm1b_full_df,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm1b_full_log_overall_freq_scaled'
-                      )
-fixef(model_smolm1b_full_log_overall_freq_scaled)
-
-model_smolm2b_full_df = model_smolm2b
-model_smolm2b_full_df$LogOverallFreq = scale(log(model_smolm2b_full_df$OverallFreq + 1))[,1]
-
-model_smolm2b_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
-                       data = model_smolm2b_full_df,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm2b_full_log_overall_freq_scaled'
-                      )
-fixef(model_smolm2b_full_log_overall_freq_scaled)
-
-model_smolm3b_full_df = model_smolm3b
-model_smolm3b_full_df$LogOverallFreq = scale(log(model_smolm3b_full_df$OverallFreq + 1))[,1]
-
-model_smolm3b_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
-                       data = model_smolm3b_full_df,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm3b_full_log_overall_freq_scaled'
-                      )
-fixef(model_smolm3b_full_log_overall_freq_scaled)
-
-model_smolm1_attested_modelb = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
-                       data = model_smolm1_attestedb,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm1_attested_modelb'
-                      )
-
-model_smolm2_attested_modelb = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
-                       data = model_smolm2_attestedb,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm2_attested_modelb'
-                      )
-
-
-model_smolm3_attested_modelb = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
-                       data = model_smolm3_attestedb,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm3_attested_modelb'
-                      )
-
-
-fixef(model_smolm1_attested_modelb)
-fixef(model_smolm2_attested_modelb)
-fixef(model_smolm3_attested_modelb)
-```
-
-### Novel Binomials
-
-```{r}
-
-
-model_smolm1_novel_modelb = brm(log_odds ~ GenPref,
-                       data = model_smolm1_novelb,
-                       prior = prior_probs,
-                       iter = 6000,
-                       warmup = 3000,
-                       chains = 4,
-                       cores = 4,
-                       #control = list(adapt_delta=0.99, max_treedepth = 15),
-                       #control = list(max_treedepth = 20),
-                       file = '../Data/model_smolm1_novel_modelb'
-                      )
-
-model_smolm2_novel_modelb = brm(log_odds ~ GenPref,
-                       data = model_smolm2_novelb,
-                       prior = prior_probs,
-                       iter = 6000,
-                       warmup = 3000,
-                       chains = 4,
-                       cores = 4,
-                       #control = list(adapt_delta=0.99, max_treedepth = 15),
-                       #control = list(max_treedepth = 20),
-                       file = '../Data/model_smolm2_novel_modelb'
-                      )
-
-model_smolm3_novel_modelb = brm(log_odds ~ GenPref,
-                       data = model_smolm3_novelb,
-                       prior = prior_probs,
-                       iter = 6000,
-                       warmup = 3000,
-                       chains = 4,
-                       cores = 4,
-                       #control = list(adapt_delta=0.99, max_treedepth = 15),
-                       #control = list(max_treedepth = 20),
-                       file = '../Data/model_smolm3_novel_modelb'
-                      )
-
-fixef(model_smolm1_novel_modelb)
-fixef(model_smolm2_novel_modelb)
-fixef(model_smolm3_novel_modelb)
-```
-
-
-# Prompt 3: "example: "
-
-## Prep Data
-
-Read in our model data
-
-```{r}
-
-model_smolm1c = read_csv('../Data/2-smolm-autoreg-bpe-babylm-1e-3_binom_ordering_prefs.csv') %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
-  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
-  select(-and) %>%
-  #mutate(across(2:3, tolower)) %>%
-  left_join(corpus) %>%
-  mutate(checkpoint = 'main') %>%
-  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
-  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
-  mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
-                             Attested == 0 ~ 0)) %>%
-  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
-  
-model_smolm2c = read_csv('../Data/2-smolm-autoreg-bpe-babylm-seed_211-1e-3_binom_ordering_prefs.csv') %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
-  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
-  select(-and) %>%
-  #mutate(across(2:3, tolower)) %>%
-  left_join(corpus) %>%
-  mutate(checkpoint = 'main') %>%
-  mutate(y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
-  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
-  mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
-                             Attested == 0 ~ 0)) %>%
-  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
-  
-
-model_smolm3c = read_csv('../Data/2-smolm-autoreg-bpe-babylm-seed_1024-1e-3_binom_ordering_prefs.csv') %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
-  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
-  select(-and) %>%
-  #mutate(across(2:3, tolower)) %>%
-  left_join(corpus) %>%
-  mutate(checkpoint = 'main') %>%
-  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
-  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
-  mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
-                             Attested == 0 ~ 0)) %>%
-  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
-  
-
-model_smolm1c = model_smolm1c %>%
-  rename(no_final_stress = `*BStress`)
-
-model_smolm2c = model_smolm2c %>%
-  rename(no_final_stress = `*BStress`)
-
-model_smolm3c = model_smolm3c %>%
-  rename(no_final_stress = `*BStress`)
-```
-
-```{r}
-
-model_smolm1_attestedc = model_smolm1c %>%
-  filter(Attested == 1)
-
-model_smolm1_novelc = model_smolm1c %>%
-  filter(Attested == 0)
-
-model_smolm2_attestedc = model_smolm2c %>%
-  filter(Attested == 1)
-
-model_smolm2_novelc = model_smolm2c %>%
-  filter(Attested == 0)
-
-model_smolm3_attestedc = model_smolm3c %>%
-  filter(Attested == 1)
-
-model_smolm3_novelc = model_smolm3c %>%
-  filter(Attested == 0)
-
-#bigram_counts = read_csv('../Data/olmo_bigram_freqs.csv')
-#onegram_corpus_size = 1560674367427
-#count_and = 43378012800
-
-#bigram_counts = bigram_counts %>%
-  #mutate(ngram = str_replace_all(ngram, '\t', ' '))
-# 
-# data_main_model = data_main_model %>%
-#   mutate(bigram1_alpha = paste0(Word1, ' and'),
-#          bigram2_alpha = paste0('and ', Word2),
-#          bigram1_nonalpha = paste0(Word2, ' and'),
-#          bigram2_nonalpha = paste0('and ', Word1)
-#          )
-# 
-# data_main_model = data_main_model %>%
-#   left_join(bigram_counts, by = c('bigram1_alpha' = 'ngram')) %>%
-#   rename(count_bigram1_alpha = count) %>%
-#   left_join(bigram_counts, by = c('bigram2_alpha' = 'ngram')) %>%
-#   rename(count_bigram2_alpha = count) %>%
-#   left_join(bigram_counts, by = c('bigram1_nonalpha' = 'ngram')) %>%
-#   rename(count_bigram1_nonalpha = count) %>%
-#   left_join(bigram_counts, by = c('bigram2_nonalpha' = 'ngram')) %>%
-#   rename(count_bigram2_nonalpha = count) %>%
-#   mutate(corpus_size = onegram_corpus_size) %>%
-#   mutate(count_and = count_and)
-
-# 
-# data_main_model = data_main_model %>%
-#   mutate(bigram_prob_alpha = (Word1_freq / corpus_size) * (count_bigram1_alpha / Word1_freq) * (count_bigram2_alpha / count_and),
-#          bigram_prob_nonalpha = (Word2_freq / corpus_size) * (count_bigram1_nonalpha / Word2_freq) * (count_bigram2_nonalpha / count_and),
-#          log_bigram_prob_alpha = log(bigram_prob_alpha),
-#          log_bigram_prob_nonalpha = log(bigram_prob_nonalpha),
-#          log_bigram_odds_ratio = log_bigram_prob_alpha - log_bigram_prob_nonalpha)
-#
-```
-
-## Analyses
-
-### Attested Binomials
-
-```{r}
-
-model_smolm1c_full_df = model_smolm1c
-model_smolm1c_full_df$LogOverallFreq = scale(log(model_smolm1c_full_df$OverallFreq + 1))[,1]
-
-model_smolm1c_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
-                       data = model_smolm1c_full_df,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm1c_full_log_overall_freq_scaled'
-                      )
-fixef(model_smolm1c_full_log_overall_freq_scaled)
-
-model_smolm2c_full_df = model_smolm2c
-model_smolm2c_full_df$LogOverallFreq = scale(log(model_smolm2c_full_df$OverallFreq + 1))[,1]
-
-model_smolm2c_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
-                       data = model_smolm2c_full_df,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm2c_full_log_overall_freq_scaled'
-                      )
-fixef(model_smolm2c_full_log_overall_freq_scaled)
-
-model_smolm3c_full_df = model_smolm3c
-model_smolm3c_full_df$LogOverallFreq = scale(log(model_smolm3c_full_df$OverallFreq + 1))[,1]
-
-model_smolm3c_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
-                       data = model_smolm3c_full_df,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm3c_full_log_overall_freq_scaled'
-                      )
-fixef(model_smolm3c_full_log_overall_freq_scaled)
-
-model_smolm1_attested_modelc = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
-                       data = model_smolm1_attestedc,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm1_attested_modelc'
-                      )
-
-model_smolm2_attested_modelc = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
-                       data = model_smolm2_attestedc,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm2_attested_modelc'
-                      )
-
-
-model_smolm3_attested_modelc = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
-                       data = model_smolm3_attestedc,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm3_attested_modelc'
-                      )
-
-
-fixef(model_smolm1_attested_modelc)
-fixef(model_smolm2_attested_modelc)
-fixef(model_smolm3_attested_modelc)
-```
-
-### Novel Binomials
-
-```{r}
-
-
-model_smolm1_novel_modelc = brm(log_odds ~ GenPref,
-                       data = model_smolm1_novelc,
-                       prior = prior_probs,
-                       iter = 6000,
-                       warmup = 3000,
-                       chains = 4,
-                       cores = 4,
-                       #control = list(adapt_delta=0.99, max_treedepth = 15),
-                       #control = list(max_treedepth = 20),
-                       file = '../Data/model_smolm1_novel_modelc'
-                      )
-
-model_smolm2_novel_modelc = brm(log_odds ~ GenPref,
-                       data = model_smolm2_novelc,
-                       prior = prior_probs,
-                       iter = 6000,
-                       warmup = 3000,
-                       chains = 4,
-                       cores = 4,
-                       #control = list(adapt_delta=0.99, max_treedepth = 15),
-                       #control = list(max_treedepth = 20),
-                       file = '../Data/model_smolm2_novel_modelc'
-                      )
-
-model_smolm3_novel_modelc = brm(log_odds ~ GenPref,
-                       data = model_smolm3_novelc,
-                       prior = prior_probs,
-                       iter = 6000,
-                       warmup = 3000,
-                       chains = 4,
-                       cores = 4,
-                       #control = list(adapt_delta=0.99, max_treedepth = 15),
-                       #control = list(max_treedepth = 20),
-                       file = '../Data/model_smolm3_novel_modelc'
-                      )
-
-fixef(model_smolm1_novel_modelc)
-fixef(model_smolm2_novel_modelc)
-fixef(model_smolm3_novel_modelc)
-```
-
-
-
-# Prompt 4: "instance: "
-
-## Prep Data
-
-Read in our model data
-
-```{r}
-
-model_smolm1d = read_csv('../Data/3-smolm-autoreg-bpe-babylm-1e-3_binom_ordering_prefs.csv') %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
-  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
-  select(-and) %>%
-  #mutate(across(2:3, tolower)) %>%
-  left_join(corpus) %>%
-  mutate(checkpoint = 'main') %>%
-  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
-  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
-  mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
-                             Attested == 0 ~ 0)) %>%
-  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
-  
-model_smolm2d = read_csv('../Data/3-smolm-autoreg-bpe-babylm-seed_211-1e-3_binom_ordering_prefs.csv') %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
-  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
-  select(-and) %>%
-  #mutate(across(2:3, tolower)) %>%
-  left_join(corpus) %>%
-  mutate(checkpoint = 'main') %>%
-  mutate(y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
-  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
-  mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
-                             Attested == 0 ~ 0)) %>%
-  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
-  
-
-model_smolm3d = read_csv('../Data/3-smolm-autoreg-bpe-babylm-seed_1024-1e-3_binom_ordering_prefs.csv') %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
-  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
-  select(-and) %>%
-  #mutate(across(2:3, tolower)) %>%
-  left_join(corpus) %>%
-  mutate(checkpoint = 'main') %>%
-  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
-  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
-  mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
-                             Attested == 0 ~ 0)) %>%
-  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
-  
-
-model_smolm1d = model_smolm1d %>%
-  rename(no_final_stress = `*BStress`)
-
-model_smolm2d = model_smolm2d %>%
-  rename(no_final_stress = `*BStress`)
-
-model_smolm3d = model_smolm3d %>%
-  rename(no_final_stress = `*BStress`)
-```
-
-```{r}
-
-model_smolm1_attestedd = model_smolm1d %>%
-  filter(Attested == 1)
-
-model_smolm1_noveld = model_smolm1d %>%
-  filter(Attested == 0)
-
-model_smolm2_attestedd = model_smolm2d %>%
-  filter(Attested == 1)
-
-model_smolm2_noveld = model_smolm2d %>%
-  filter(Attested == 0)
-
-model_smolm3_attestedd = model_smolm3d %>%
-  filter(Attested == 1)
-
-model_smolm3_noveld = model_smolm3d %>%
-  filter(Attested == 0)
-
-#bigram_counts = read_csv('../Data/olmo_bigram_freqs.csv')
-#onegram_corpus_size = 1560674367427
-#count_and = 43378012800
-
-#bigram_counts = bigram_counts %>%
-  #mutate(ngram = str_replace_all(ngram, '\t', ' '))
-# 
-# data_main_model = data_main_model %>%
-#   mutate(bigram1_alpha = paste0(Word1, ' and'),
-#          bigram2_alpha = paste0('and ', Word2),
-#          bigram1_nonalpha = paste0(Word2, ' and'),
-#          bigram2_nonalpha = paste0('and ', Word1)
-#          )
-# 
-# data_main_model = data_main_model %>%
-#   left_join(bigram_counts, by = c('bigram1_alpha' = 'ngram')) %>%
-#   rename(count_bigram1_alpha = count) %>%
-#   left_join(bigram_counts, by = c('bigram2_alpha' = 'ngram')) %>%
-#   rename(count_bigram2_alpha = count) %>%
-#   left_join(bigram_counts, by = c('bigram1_nonalpha' = 'ngram')) %>%
-#   rename(count_bigram1_nonalpha = count) %>%
-#   left_join(bigram_counts, by = c('bigram2_nonalpha' = 'ngram')) %>%
-#   rename(count_bigram2_nonalpha = count) %>%
-#   mutate(corpus_size = onegram_corpus_size) %>%
-#   mutate(count_and = count_and)
-
-# 
-# data_main_model = data_main_model %>%
-#   mutate(bigram_prob_alpha = (Word1_freq / corpus_size) * (count_bigram1_alpha / Word1_freq) * (count_bigram2_alpha / count_and),
-#          bigram_prob_nonalpha = (Word2_freq / corpus_size) * (count_bigram1_nonalpha / Word2_freq) * (count_bigram2_nonalpha / count_and),
-#          log_bigram_prob_alpha = log(bigram_prob_alpha),
-#          log_bigram_prob_nonalpha = log(bigram_prob_nonalpha),
-#          log_bigram_odds_ratio = log_bigram_prob_alpha - log_bigram_prob_nonalpha)
-#
-```
-
-## Analyses
-
-### Attested Binomials
-
-```{r}
-
-model_smolm1d_full_df = model_smolm1d
-model_smolm1d_full_df$LogOverallFreq = scale(log(model_smolm1d_full_df$OverallFreq + 1))[,1]
-
-model_smolm1d_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
-                       data = model_smolm1d_full_df,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm1d_full_log_overall_freq_scaled'
-                      )
-
-model_smolm2d_full_df = model_smolm2d
-model_smolm2d_full_df$LogOverallFreq = scale(log(model_smolm2d_full_df$OverallFreq + 1))[,1]
-
-model_smolm2d_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
-                       data = model_smolm2d_full_df,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm2d_full_log_overall_freq_scaled'
-                      )
-
-
-
-model_smolm3d_full_df = model_smolm3d
-model_smolm3d_full_df$LogOverallFreq = scale(log(model_smolm3d_full_df$OverallFreq + 1))[,1]
-
-model_smolm3d_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
-                       data = model_smolm3d_full_df,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm3d_full_log_overall_freq_scaled'
-                      )
-
-fixef(model_smolm3d_full_log_overall_freq_scaled)
-
-
-model_smolm1_attested_modeld = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
-                       data = model_smolm1_attestedd,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm1_attested_modeld'
-                      )
-
-model_smolm2_attested_modeld = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
-                       data = model_smolm2_attestedd,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm2_attested_modeld'
-                      )
-
-
-model_smolm3_attested_modeld = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
-                       data = model_smolm3_attestedd,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm3_attested_modeld'
-                      )
-
-
-fixef(model_smolm1_attested_modeld)
-fixef(model_smolm2_attested_modeld)
-fixef(model_smolm3_attested_modeld)
-```
-
-### Novel Binomials
-
-```{r}
-
-
-model_smolm1_novel_modeld = brm(log_odds ~ GenPref,
-                       data = model_smolm1_noveld,
-                       prior = prior_probs,
-                       iter = 6000,
-                       warmup = 3000,
-                       chains = 4,
-                       cores = 4,
-                       #control = list(adapt_delta=0.99, max_treedepth = 15),
-                       #control = list(max_treedepth = 20),
-                       file = '../Data/model_smolm1_novel_modeld'
-                      )
-
-model_smolm2_novel_modeld = brm(log_odds ~ GenPref,
-                       data = model_smolm2_noveld,
-                       prior = prior_probs,
-                       iter = 6000,
-                       warmup = 3000,
-                       chains = 4,
-                       cores = 4,
-                       #control = list(adapt_delta=0.99, max_treedepth = 15),
-                       #control = list(max_treedepth = 20),
-                       file = '../Data/model_smolm2_novel_modeld'
-                      )
-
-model_smolm3_novel_modeld = brm(log_odds ~ GenPref,
-                       data = model_smolm3_noveld,
-                       prior = prior_probs,
-                       iter = 6000,
-                       warmup = 3000,
-                       chains = 4,
-                       cores = 4,
-                       #control = list(adapt_delta=0.99, max_treedepth = 15),
-                       #control = list(max_treedepth = 20),
-                       file = '../Data/model_smolm3_novel_modeld'
-                      )
-
-fixef(model_smolm1_novel_modeld)
-fixef(model_smolm2_novel_modeld)
-fixef(model_smolm3_novel_modeld)
-```
-
-
-
-# Prompt 5: "try this: "
-
-## Prep Data
-
-Read in our model data
-
-```{r}
-
-model_smolm1e = read_csv('../Data/4-smolm-autoreg-bpe-babylm-1e-3_binom_ordering_prefs.csv') %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
-  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
-  select(-and) %>%
-  #mutate(across(2:3, tolower)) %>%
-  left_join(corpus) %>%
-  mutate(checkpoint = 'main') %>%
-  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
-  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
-  mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
-                             Attested == 0 ~ 0)) %>%
-  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
-  
-model_smolm2e = read_csv('../Data/4-smolm-autoreg-bpe-babylm-seed_211-1e-3_binom_ordering_prefs.csv') %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
-  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
-  select(-and) %>%
-  #mutate(across(2:3, tolower)) %>%
-  left_join(corpus) %>%
-  mutate(checkpoint = 'main') %>%
-  mutate(y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
-  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
-  mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
-                             Attested == 0 ~ 0)) %>%
-  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
-  
-
-model_smolm3e = read_csv('../Data/4-smolm-autoreg-bpe-babylm-seed_1024-1e-3_binom_ordering_prefs.csv') %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
-  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
-  select(-and) %>%
-  #mutate(across(2:3, tolower)) %>%
-  left_join(corpus) %>%
-  mutate(checkpoint = 'main') %>%
-  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
-  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
-  mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
-                             Attested == 0 ~ 0)) %>%
-  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
-  
-
-model_smolm1e = model_smolm1e %>%
-  rename(no_final_stress = `*BStress`)
-
-model_smolm2e = model_smolm2e %>%
-  rename(no_final_stress = `*BStress`)
-
-model_smolm3e = model_smolm3e %>%
-  rename(no_final_stress = `*BStress`)
-```
-
-```{r}
-
-model_smolm1_attestede = model_smolm1e %>%
-  filter(Attested == 1)
-
-model_smolm1_novele = model_smolm1e %>%
-  filter(Attested == 0)
-
-model_smolm2_attestede = model_smolm2e %>%
-  filter(Attested == 1)
-
-model_smolm2_novele = model_smolm2e %>%
-  filter(Attested == 0)
-
-model_smolm3_attestede = model_smolm3e %>%
-  filter(Attested == 1)
-
-model_smolm3_novele = model_smolm3e %>%
-  filter(Attested == 0)
-
-#bigram_counts = read_csv('../Data/olmo_bigram_freqs.csv')
-#onegram_corpus_size = 1560674367427
-#count_and = 43378012800
-
-#bigram_counts = bigram_counts %>%
-  #mutate(ngram = str_replace_all(ngram, '\t', ' '))
-# 
-# data_main_model = data_main_model %>%
-#   mutate(bigram1_alpha = paste0(Word1, ' and'),
-#          bigram2_alpha = paste0('and ', Word2),
-#          bigram1_nonalpha = paste0(Word2, ' and'),
-#          bigram2_nonalpha = paste0('and ', Word1)
-#          )
-# 
-# data_main_model = data_main_model %>%
-#   left_join(bigram_counts, by = c('bigram1_alpha' = 'ngram')) %>%
-#   rename(count_bigram1_alpha = count) %>%
-#   left_join(bigram_counts, by = c('bigram2_alpha' = 'ngram')) %>%
-#   rename(count_bigram2_alpha = count) %>%
-#   left_join(bigram_counts, by = c('bigram1_nonalpha' = 'ngram')) %>%
-#   rename(count_bigram1_nonalpha = count) %>%
-#   left_join(bigram_counts, by = c('bigram2_nonalpha' = 'ngram')) %>%
-#   rename(count_bigram2_nonalpha = count) %>%
-#   mutate(corpus_size = onegram_corpus_size) %>%
-#   mutate(count_and = count_and)
-
-# 
-# data_main_model = data_main_model %>%
-#   mutate(bigram_prob_alpha = (Word1_freq / corpus_size) * (count_bigram1_alpha / Word1_freq) * (count_bigram2_alpha / count_and),
-#          bigram_prob_nonalpha = (Word2_freq / corpus_size) * (count_bigram1_nonalpha / Word2_freq) * (count_bigram2_nonalpha / count_and),
-#          log_bigram_prob_alpha = log(bigram_prob_alpha),
-#          log_bigram_prob_nonalpha = log(bigram_prob_nonalpha),
-#          log_bigram_odds_ratio = log_bigram_prob_alpha - log_bigram_prob_nonalpha)
-#
-```
-
-## Analyses
-
-### Attested Binomials
-
-```{r}
-model_smolm1e_full_df = model_smolm1e
-model_smolm1e_full_df$LogOverallFreq = scale(log(model_smolm1e_full_df$OverallFreq + 1))[,1]
-
-model_smolm1e_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
-                       data = model_smolm1e_full_df,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm1e_full_log_overall_freq_scaled'
-                      )
-fixef(model_smolm1e_full_log_overall_freq_scaled)
-
-model_smolm2e_full_df = model_smolm2e
-model_smolm2e_full_df$LogOverallFreq = scale(log(model_smolm2e_full_df$OverallFreq + 1))[,1]
-
-model_smolm2e_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
-                       data = model_smolm2e_full_df,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm2e_full_log_overall_freq_scaled'
-                      )
-fixef(model_smolm2e_full_log_overall_freq_scaled)
-
-
-model_smolm3e_full_df = model_smolm3e
-model_smolm3e_full_df$LogOverallFreq = scale(log(model_smolm3e_full_df$OverallFreq + 1))[,1]
-
-model_smolm3e_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
-                       data = model_smolm3e_full_df,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm3e_full_log_overall_freq_scaled'
-                      )
-fixef(model_smolm3e_full_log_overall_freq_scaled)
-
-model_smolm1_attested_modele = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
-                       data = model_smolm1_attestede,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm1_attested_modele'
-                      )
-
-model_smolm2_attested_modele = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
-                       data = model_smolm2_attestede,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm2_attested_modele'
-                      )
-
-
-model_smolm3_attested_modele = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
-                       data = model_smolm3_attestede,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm3_attested_modele'
-                      )
-
-
-fixef(model_smolm1_attested_modele)
-fixef(model_smolm2_attested_modele)
-fixef(model_smolm3_attested_modele)
-```
-
-### Novel Binomials
-
-```{r}
-
-
-model_smolm1_novel_modele = brm(log_odds ~ GenPref,
-                       data = model_smolm1_novele,
-                       prior = prior_probs,
-                       iter = 6000,
-                       warmup = 3000,
-                       chains = 4,
-                       cores = 4,
-                       #control = list(adapt_delta=0.99, max_treedepth = 15),
-                       #control = list(max_treedepth = 20),
-                       file = '../Data/model_smolm1_novel_modele'
-                      )
-
-model_smolm2_novel_modele = brm(log_odds ~ GenPref,
-                       data = model_smolm2_novele,
-                       prior = prior_probs,
-                       iter = 6000,
-                       warmup = 3000,
-                       chains = 4,
-                       cores = 4,
-                       #control = list(adapt_delta=0.99, max_treedepth = 15),
-                       #control = list(max_treedepth = 20),
-                       file = '../Data/model_smolm2_novel_modele'
-                      )
-
-model_smolm3_novel_modele = brm(log_odds ~ GenPref,
-                       data = model_smolm3_novele,
-                       prior = prior_probs,
-                       iter = 6000,
-                       warmup = 3000,
-                       chains = 4,
-                       cores = 4,
-                       #control = list(adapt_delta=0.99, max_treedepth = 15),
-                       #control = list(max_treedepth = 20),
-                       file = '../Data/model_smolm3_novel_modele'
-                      )
-
-fixef(model_smolm1_novel_modele)
-fixef(model_smolm2_novel_modele)
-fixef(model_smolm3_novel_modele)
-```
-
-
-
-# Prompt 6: "[BOS]"
-
-## Prep Data
-
-Read in our model data
-
-```{r}
-
-model_smolm1f = read_csv('../Data/5-smolm-autoreg-bpe-babylm-1e-3_binom_ordering_prefs.csv') %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
-  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
-  select(-and) %>%
-  #mutate(across(2:3, tolower)) %>%
-  left_join(corpus) %>%
-  mutate(checkpoint = 'main') %>%
-  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
-  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
-  mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
-                             Attested == 0 ~ 0)) %>%
-  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
-  
-model_smolm2f = read_csv('../Data/5-smolm-autoreg-bpe-babylm-seed_211-1e-3_binom_ordering_prefs.csv') %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
-  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
-  select(-and) %>%
-  #mutate(across(2:3, tolower)) %>%
-  left_join(corpus) %>%
-  mutate(checkpoint = 'main') %>%
-  mutate(y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
-  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
-  mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
-                             Attested == 0 ~ 0)) %>%
-  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
-  
-
-model_smolm3f = read_csv('../Data/5-smolm-autoreg-bpe-babylm-seed_1024-1e-3_binom_ordering_prefs.csv') %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`) %>%
-  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
-  select(-and) %>%
-  #mutate(across(2:3, tolower)) %>%
-  left_join(corpus) %>%
-  mutate(checkpoint = 'main') %>%
-  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
-  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
-  mutate(GenPref = GenPref - 0.5) %>%
-  mutate(RelFreq = case_when(Attested == 1 ~ RelFreq - 0.5,
-                             Attested == 0 ~ 0)) %>%
-  mutate(ProbAandB = exp(`Alpha Probs`) / (exp(`Alpha Probs`) + exp(`Nonalpha Probs`))) %>%
-  mutate(log_odds = `Alpha Probs` - `Nonalpha Probs`)
-  
-
-model_smolm1f = model_smolm1f %>%
-  rename(no_final_stress = `*BStress`)
-
-model_smolm2f = model_smolm2f %>%
-  rename(no_final_stress = `*BStress`)
-
-model_smolm3f = model_smolm3f %>%
-  rename(no_final_stress = `*BStress`)
-```
-
-```{r}
-
-model_smolm1_attestedf = model_smolm1f %>%
-  filter(Attested == 1)
-
-model_smolm1_novelf = model_smolm1f %>%
-  filter(Attested == 0)
-
-model_smolm2_attestedf = model_smolm2f %>%
-  filter(Attested == 1)
-
-model_smolm2_novelf = model_smolm2f %>%
-  filter(Attested == 0)
-
-model_smolm3_attestedf = model_smolm3f %>%
-  filter(Attested == 1)
-
-model_smolm3_novelf = model_smolm3f %>%
-  filter(Attested == 0)
-
-#bigram_counts = read_csv('../Data/olmo_bigram_freqs.csv')
-#onegram_corpus_size = 1560674367427
-#count_and = 43378012800
-
-#bigram_counts = bigram_counts %>%
-  #mutate(ngram = str_replace_all(ngram, '\t', ' '))
-# 
-# data_main_model = data_main_model %>%
-#   mutate(bigram1_alpha = paste0(Word1, ' and'),
-#          bigram2_alpha = paste0('and ', Word2),
-#          bigram1_nonalpha = paste0(Word2, ' and'),
-#          bigram2_nonalpha = paste0('and ', Word1)
-#          )
-# 
-# data_main_model = data_main_model %>%
-#   left_join(bigram_counts, by = c('bigram1_alpha' = 'ngram')) %>%
-#   rename(count_bigram1_alpha = count) %>%
-#   left_join(bigram_counts, by = c('bigram2_alpha' = 'ngram')) %>%
-#   rename(count_bigram2_alpha = count) %>%
-#   left_join(bigram_counts, by = c('bigram1_nonalpha' = 'ngram')) %>%
-#   rename(count_bigram1_nonalpha = count) %>%
-#   left_join(bigram_counts, by = c('bigram2_nonalpha' = 'ngram')) %>%
-#   rename(count_bigram2_nonalpha = count) %>%
-#   mutate(corpus_size = onegram_corpus_size) %>%
-#   mutate(count_and = count_and)
-
-# 
-# data_main_model = data_main_model %>%
-#   mutate(bigram_prob_alpha = (Word1_freq / corpus_size) * (count_bigram1_alpha / Word1_freq) * (count_bigram2_alpha / count_and),
-#          bigram_prob_nonalpha = (Word2_freq / corpus_size) * (count_bigram1_nonalpha / Word2_freq) * (count_bigram2_nonalpha / count_and),
-#          log_bigram_prob_alpha = log(bigram_prob_alpha),
-#          log_bigram_prob_nonalpha = log(bigram_prob_nonalpha),
-#          log_bigram_odds_ratio = log_bigram_prob_alpha - log_bigram_prob_nonalpha)
-#
-```
-
-## Analyses
-
-### Attested Binomials
-
-```{r}
-model_smolm1f_full_df = model_smolm1f
-model_smolm1f_full_df$LogOverallFreq = scale(log(model_smolm1f_full_df$OverallFreq + 1))[,1]
-
-model_smolm1f_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
-                       data = model_smolm1f_full_df,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm1f_full_log_overall_freq_scaled'
-                      )
-
-model_smolm2f_full_df = model_smolm2f
-model_smolm2f_full_df$LogOverallFreq = scale(log(model_smolm2f_full_df$OverallFreq + 1))[,1]
-
-model_smolm2f_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
-                       data = model_smolm2f_full_df,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm2f_full_log_overall_freq_scaled'
-                      )
-
-model_smolm3f_full_df = model_smolm3f
-model_smolm3f_full_df$LogOverallFreq = scale(log(model_smolm3f_full_df$OverallFreq + 1))[,1]
-
-model_smolm3f_full_log_overall_freq_scaled = brm(log_odds ~ GenPref + RelFreq + GenPref:LogOverallFreq + RelFreq:LogOverallFreq + LogOverallFreq,
-                       data = model_smolm3f_full_df,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm3f_full_log_overall_freq_scaled'
-                      )
-
-fixef(model_smolm1f_full_log_overall_freq_scaled)
-model_smolm1_attested_modelf = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
-                       data = model_smolm1_attestedf,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm1_attested_modelf'
-                      )
-
-model_smolm2_attested_modelf = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
-                       data = model_smolm2_attestedf,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm2_attested_modelf'
-                      )
-
-
-model_smolm3_attested_modelf = brm( log_odds ~ GenPref + RelFreq + GenPref:OverallFreq + RelFreq:OverallFreq + OverallFreq,
-                       data = model_smolm3_attestedf,
-                       prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       control = list(adapt_delta=0.99, max_treedepth = 20),
-                       file = '../Data/model_smolm3_attested_modelf'
-                      )
-
-
-fixef(model_smolm1_attested_modelf)
-fixef(model_smolm2_attested_modelf)
-fixef(model_smolm3_attested_modelf)
-```
-
-### Novel Binomials
-
-```{r}
-
-
-model_smolm1_novel_modelf = brm(log_odds ~ GenPref,
-                       data = model_smolm1_novelf,
-                       prior = prior_probs,
-                       iter = 6000,
-                       warmup = 3000,
-                       chains = 4,
-                       cores = 4,
-                       #control = list(adapt_delta=0.99, max_treedepth = 15),
-                       #control = list(max_treedepth = 20),
-                       file = '../Data/model_smolm1_novel_modelf'
-                      )
-
-model_smolm2_novel_modelf = brm(log_odds ~ GenPref,
-                       data = model_smolm2_novelf,
-                       prior = prior_probs,
-                       iter = 6000,
-                       warmup = 3000,
-                       chains = 4,
-                       cores = 4,
-                       #control = list(adapt_delta=0.99, max_treedepth = 15),
-                       #control = list(max_treedepth = 20),
-                       file = '../Data/model_smolm2_novel_modelf'
-                      )
-
-model_smolm3_novel_modelf = brm(log_odds ~ GenPref,
-                       data = model_smolm3_novelf,
-                       prior = prior_probs,
-                       iter = 6000,
-                       warmup = 3000,
-                       chains = 4,
-                       cores = 4,
-                       #control = list(adapt_delta=0.99, max_treedepth = 15),
-                       #control = list(max_treedepth = 20),
-                       file = '../Data/model_smolm3_novel_modelf'
-                      )
-
-fixef(model_smolm1_novel_modelf)
-fixef(model_smolm2_novel_modelf)
-fixef(model_smolm3_novel_modelf)
-```
-
-
-# Qing's model, all prompts
+## Baseline model
 
 ```{r}
 options(contrasts = c("contr.sum","contr.sum"))
@@ -1729,23 +98,23 @@ model_small_novel_genpref = brm(log_odds ~ GenPref + (GenPref | prompt) + (1 | A
 
 
 ### Vif then backward model selection
-
-model_small_novel_individual_constraints = brm(log_odds ~ Culture + Power + Freq + Len + no_final_stress + Intense + Percept + Lapse + (Culture + Power + Freq + Len + no_final_stress + Intense + Percept + Lapse | prompt) + ( 1 | Alpha),
-                       data = small_novel,
-                       #prior = prior_probs,
-                       iter = 10000,
-                       warmup = 5000,
-                       chains = 4,
-                       cores = 4,
-                       #control = list(adapt_delta=0.99, max_treedepth = 15),
-                       #control = list(max_treedepth = 20),
-                       file = '../Data/model_small_novel_individual_constraints'
-                      )
+# 
+# model_small_novel_individual_constraints = brm(log_odds ~ Culture + Power + Freq + Len + no_final_stress + Intense + Percept + Lapse + (Culture + Power + Freq + Len + no_final_stress + Intense + Percept + Lapse | prompt) + ( 1 | Alpha),
+#                        data = small_novel,
+#                        #prior = prior_probs,
+#                        iter = 10000,
+#                        warmup = 5000,
+#                        chains = 4,
+#                        cores = 4,
+#                        #control = list(adapt_delta=0.99, max_treedepth = 15),
+#                        #control = list(max_treedepth = 20),
+#                        file = '../Data/model_small_novel_individual_constraints'
+#                       )
  
 
 fixef(model_small_attested_genpref)
 fixef(model_small_novel_genpref)
-fixef(model_small_novel_individual_constraints)
+#fixef(model_small_novel_individual_constraints)
 #car::vif(model_small_novel_individual_constraints)
 
 
@@ -1753,17 +122,14 @@ fixef(model_small_novel_individual_constraints)
 
 
 ```
-
-# Finetuning on GenPref
-
-
+## Finetuned on Genpref
 
 ```{r}
 options(contrasts = c("contr.sum","contr.sum"))
 
 corpus = read_csv('../Data/nonce_and_attested_binoms.csv')
 
-model_results_genpref = read_csv('../Data/FINETUNED_GENPREF_MODEL_BINOMIAL_PREFERENCES.csv') %>%
+model_data_finetuned_genpref = read_csv('../Data/FINETUNED_GENPREF_MODEL_BINOMIAL_PREFERENCES.csv') %>%
   mutate(log_odds = preference) %>%
   separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
   select(-and) %>%
@@ -1774,37 +140,30 @@ model_results_genpref = read_csv('../Data/FINETUNED_GENPREF_MODEL_BINOMIAL_PREFE
   mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
   mutate(GenPref = GenPref - 0.5) %>%
   mutate(RelFreq = RelFreq - 0.5) %>%
-  ungroup() 
+  ungroup() %>%
+  filter(model == "qing-yao/genfreq-finetuned-ep10_seed-42_1e-4")
 
 
-model_results_genpref$prompt = factor(model_results_genpref$prompt)
-
-model_results_genpref = model_results_genpref %>%
-  rename(no_final_stress = "*BStress")
-
-
-
-small_attested_genpref = model_results_genpref %>%
+small_attested_genpref = model_data_finetuned_genpref %>%
   filter(Attested == 1) %>%
   mutate(CenteredOverallFreq = scale(log(OverallFreq))) 
 
-small_novel_genpref = model_results_genpref %>%
+
+small_novel_genpref = model_data_finetuned_genpref %>%
   filter(Attested == 0)
 
 small_attested_genpref$prompt = factor(small_attested_genpref$prompt)
 small_novel_genpref$prompt = factor(small_novel_genpref$prompt)
-```
 
-```{r}
+small_novel_genpref = small_novel_genpref %>%
+  rename(no_final_stress = "*BStress")
 
-######################################################################################
-######################################################################################
-## we'll come back to running these models once we have found the best language model 
-######################################################################################
-######################################################################################
+small_attested_genpref = small_attested_genpref %>%
+  rename(no_final_stress = "*BStress")
 
 
-model_small_attested_genpref_finetuned = brm(log_odds ~ (GenPref + RelFreq + CenteredOverallFreq + GenPref:CenteredOverallFreq + RelFreq:CenteredOverallFreq) * model + (GenPref | prompt) + (1 | Alpha),
+
+model_small_attested_genpref_finetuned = brm(log_odds ~ (GenPref + RelFreq + CenteredOverallFreq + GenPref:CenteredOverallFreq + RelFreq:CenteredOverallFreq) + (GenPref | prompt) + (1 | Alpha),
                        data = small_attested_genpref,
                        #prior = prior_probs,
                        iter = 10000,
@@ -1817,7 +176,7 @@ model_small_attested_genpref_finetuned = brm(log_odds ~ (GenPref + RelFreq + Cen
                       )
 
 
-model_small_novel_genpref_finetuned = brm(log_odds ~ GenPref * model + (GenPref * model | prompt) + (1 | Alpha),
+model_small_novel_genpref_finetuned = brm(log_odds ~ GenPref + (GenPref | prompt) + (1 | Alpha),
                        data = small_novel_genpref,
                        #prior = prior_probs,
                        iter = 10000,
@@ -1833,50 +192,503 @@ model_small_novel_genpref_finetuned = brm(log_odds ~ GenPref * model + (GenPref 
 
 ### Vif then backward model selection
 
-model_small_novel_individual_constraints_finetuned = brm(log_odds ~ Culture + Power + Freq + Len + no_final_stress + Intense + Percept + Lapse + (Culture + Power + Freq + Len + no_final_stress + Intense + Percept + Lapse | prompt) + ( 1 | Alpha),
-                       data = small_novel_genpref,
+# model_small_novel_individual_constraints_finetuned = brm(log_odds ~ Culture + Power + Freq + Len + no_final_stress + Intense + Percept + Lapse + (Culture + Power + Freq + Len + no_final_stress + Intense + Percept + Lapse | prompt) + ( 1 | Alpha),
+#                        data = small_novel_genpref,
+#                        #prior = prior_probs,
+#                        iter = 10000,
+#                        warmup = 5000,
+#                        chains = 4,
+#                        cores = 4,
+#                        #control = list(adapt_delta=0.99, max_treedepth = 15),
+#                        #control = list(max_treedepth = 20),
+#                        file = '../Data/model_small_novel_individual_constraints_finetuned'
+#                       )
+#  
+
+fixef(model_small_attested_genpref_finetuned)
+fixef(model_small_novel_genpref_finetuned)
+#fixef(model_small_novel_individual_constraints)
+#car::vif(model_small_novel_individual_constraints_finetuned)
+
+
+
+```
+
+### testing with previous version of Qing's model
+
+```{r}
+model_data_finetuned_genpref_old = read_csv('../Data/FINETUNED_GENPREF_MODEL_PREVIOUS_BINOMIAL_PREFERENCES.csv') %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = RelFreq - 0.5) %>%
+  ungroup() #%>%
+  #filter(model == "qing-yao/genfreq-finetuned-ep10_seed-42_1e-4")
+
+
+small_attested_genpref_old = model_data_finetuned_genpref_old %>%
+  filter(Attested == 1) %>%
+  mutate(CenteredOverallFreq = scale(log(OverallFreq))) 
+
+
+small_novel_genpref_old = model_data_finetuned_genpref_old %>%
+  filter(Attested == 0)
+
+small_attested_genpref_old$prompt = factor(small_attested_genpref_old$prompt)
+small_novel_genpref_old$prompt = factor(small_novel_genpref_old$prompt)
+
+small_novel_genpref_old = small_novel_genpref_old %>%
+  rename(no_final_stress = "*BStress")
+
+small_attested_genpref_old = small_attested_genpref_old %>%
+  rename(no_final_stress = "*BStress")
+
+
+
+model_small_attested_genpref_finetuned_old = brm(log_odds ~ (GenPref + RelFreq + CenteredOverallFreq + GenPref:CenteredOverallFreq + RelFreq:CenteredOverallFreq) + (GenPref | prompt) + (1 | Alpha),
+                       data = small_attested_genpref_old,
                        #prior = prior_probs,
                        iter = 10000,
                        warmup = 5000,
                        chains = 4,
                        cores = 4,
                        #control = list(adapt_delta=0.99, max_treedepth = 15),
-                       #control = list(max_treedepth = 20),
-                       file = '../Data/model_small_novel_individual_constraints_finetuned'
+                       control = list(max_treedepth = 20),
+                       file = '../Data/model_small_attested_genpref_finetuned_old'
                       )
- 
-
-fixef(model_small_attested_genpref_finetuned)
-fixef(model_small_novel_genpref_finetuned)
-fixef(model_small_novel_individual_constraints)
-#car::vif(model_small_novel_individual_constraints_finetuned)
 
 
-library(dplyr)
-library(tidyr)
-
-df_item_model <- model_results_genpref %>%
-  full_join(baseline_model_data) #%>%
-  group_by(Alpha, model) %>%
-  summarise(
-    log_odds = mean(log_odds, na.rm = TRUE),
-    .groups = "drop"
-  )
-
-library(tidyr)
-
-df_wide <- df_item_model %>%
-  pivot_wider(
-    names_from  = model,
-    values_from = log_odds
-  )
+model_small_novel_genpref_finetuned_old = brm(log_odds ~ GenPref + (GenPref | prompt) + (1 | Alpha),
+                       data = small_novel_genpref_old,
+                       #prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_small_novel_genpref_finetuned_old'
+                      )
 
 
-cor_mat <- df_wide %>%
-  select(-Alpha) %>%
-  cor(use = "pairwise.complete.obs")
+### Vif then backward model selection
+
+# model_small_novel_individual_constraints_finetuned = brm(log_odds ~ Culture + Power + Freq + Len + no_final_stress + Intense + Percept + Lapse + (Culture + Power + Freq + Len + no_final_stress + Intense + Percept + Lapse | prompt) + ( 1 | Alpha),
+#                        data = small_novel_genpref,
+#                        #prior = prior_probs,
+#                        iter = 10000,
+#                        warmup = 5000,
+#                        chains = 4,
+#                        cores = 4,
+#                        #control = list(adapt_delta=0.99, max_treedepth = 15),
+#                        #control = list(max_treedepth = 20),
+#                        file = '../Data/model_small_novel_individual_constraints_finetuned'
+#                       )
+#  
+
+fixef(model_small_attested_genpref_finetuned_old)
+fixef(model_small_novel_genpref_finetuned_old)
+```
+
+### genpref 1 epoch
+
+```{r}
+options(contrasts = c("contr.sum","contr.sum"))
+
+corpus = read_csv('../Data/nonce_and_attested_binoms.csv')
+
+model_data_finetuned_genpref_1epoch =
+  read_csv('../Data/FINETUNED_GENPREF_1EPOCH_MODEL_BINOMIAL_PREFERENCES.csv') %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c('Word1','and','Word2'), remove = FALSE, sep = ' ') %>%
+  select(-and) %>%
+  left_join(corpus) %>%
+  mutate(
+    checkpoint = '1epoch',
+    y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +
+             0.41836997*Culture + 0.25967334*Power + 0.01867604*Intense +
+             1.30365980*Icon + 0.08553552*Freq + 0.15241566*Len -
+             0.19381657*Lapse + 0.36019221*`*BStress`,
+    GenPref = plogis(y_vals) - 0.5,
+    RelFreq = RelFreq - 0.5
+  ) %>%
+  ungroup()
+
+small_attested_genpref_1epoch =
+  model_data_finetuned_genpref_1epoch %>%
+  filter(Attested == 1) %>%
+  mutate(CenteredOverallFreq = scale(log(OverallFreq)))
+
+small_novel_genpref_1epoch =
+  model_data_finetuned_genpref_1epoch %>%
+  filter(Attested == 0)
+
+small_attested_genpref_1epoch$prompt = factor(small_attested_genpref_1epoch$prompt)
+small_novel_genpref_1epoch$prompt    = factor(small_novel_genpref_1epoch$prompt)
+
+small_attested_genpref_1epoch =
+  small_attested_genpref_1epoch %>%
+  rename(no_final_stress = "*BStress")
+
+small_novel_genpref_1epoch =
+  small_novel_genpref_1epoch %>%
+  rename(no_final_stress = "*BStress")
+
+model_small_attested_genpref_finetuned_1epoch = brm(
+  log_odds ~
+    (GenPref + RelFreq + CenteredOverallFreq +
+     GenPref:CenteredOverallFreq + RelFreq:CenteredOverallFreq) +
+    (GenPref | prompt) + (1 | Alpha),
+  data   = small_attested_genpref_1epoch,
+  iter   = 10000,
+  warmup = 5000,
+  chains = 4,
+  cores  = 4,
+  control = list(max_treedepth = 20),
+  file   = '../Data/model_small_attested_genpref_finetuned_1epoch'
+)
+
+model_small_novel_genpref_finetuned_1epoch = brm(
+  log_odds ~ GenPref + (GenPref | prompt) + (1 | Alpha),
+  data   = small_novel_genpref_1epoch,
+  iter   = 10000,
+  warmup = 5000,
+  chains = 4,
+  cores  = 4,
+  file   = '../Data/model_small_novel_genpref_finetuned_1epoch'
+)
+
+fixef(model_small_attested_genpref_finetuned_1epoch)
+fixef(model_small_novel_genpref_finetuned_1epoch)
 
 ```
+
+
+## Finetuned on RelFreq
+
+```{r}
+corpus = read_csv('../Data/nonce_and_attested_binoms.csv')
+
+model_data_finetuned_relfreq = read_csv('../Data/FINETUNED_RELFREQ_MODEL_BINOMIAL_PREFERENCES.csv') %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = RelFreq - 0.5) %>%
+  ungroup() 
+
+
+small_attested_relfreq = model_data_finetuned_relfreq %>%
+  filter(Attested == 1) %>%
+  mutate(CenteredOverallFreq = scale(log(OverallFreq))) 
+
+
+small_novel_relfreq = model_data_finetuned_relfreq %>%
+  filter(Attested == 0)
+
+small_attested_relfreq$prompt = factor(small_attested_relfreq$prompt)
+small_novel_relfreq$prompt = factor(small_novel_relfreq$prompt)
+
+small_novel_relfreq = small_novel_relfreq %>%
+  rename(no_final_stress = "*BStress")
+
+small_attested_relfreq = small_attested_relfreq %>%
+  rename(no_final_stress = "*BStress")
+
+
+
+model_small_attested_relfreq_finetuned = brm(log_odds ~ (GenPref + RelFreq + CenteredOverallFreq + GenPref:CenteredOverallFreq + RelFreq:CenteredOverallFreq) + (GenPref | prompt) + (1 | Alpha),
+                       data = small_attested_relfreq,
+                       #prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       control = list(max_treedepth = 20),
+                       file = '../Data/model_small_attested_relfreq_finetuned'
+                      )
+
+
+model_small_novel_relfreq_finetuned = brm(log_odds ~ GenPref + (GenPref | prompt) + (1 | Alpha),
+                       data = small_novel_relfreq,
+                       #prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_small_novel_relfreq_finetuned'
+                      )
+
+
+### Vif then backward model selection
+
+# model_small_novel_individual_constraints_finetuned = brm(log_odds ~ Culture + Power + Freq + Len + no_final_stress + Intense + Percept + Lapse + (Culture + Power + Freq + Len + no_final_stress + Intense + Percept + Lapse | prompt) + ( 1 | Alpha),
+#                        data = small_novel_genpref,
+#                        #prior = prior_probs,
+#                        iter = 10000,
+#                        warmup = 5000,
+#                        chains = 4,
+#                        cores = 4,
+#                        #control = list(adapt_delta=0.99, max_treedepth = 15),
+#                        #control = list(max_treedepth = 20),
+#                        file = '../Data/model_small_novel_individual_constraints_finetuned'
+#                       )
+#  
+
+fixef(model_small_attested_relfreq_finetuned)
+fixef(model_small_novel_relfreq_finetuned)
+```
+### RelFreq 1 epoch
+
+```{r}
+options(contrasts = c("contr.sum","contr.sum"))
+
+corpus = read_csv('../Data/nonce_and_attested_binoms.csv')
+
+model_data_finetuned_relfreq_1epoch =
+  read_csv('../Data/FINETUNED_RELFREQ_1EPOCH_MODEL_BINOMIAL_PREFERENCES.csv') %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c('Word1','and','Word2'), remove = FALSE, sep = ' ') %>%
+  select(-and) %>%
+  left_join(corpus) %>%
+  mutate(
+    checkpoint = '1epoch',
+    y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +
+             0.41836997*Culture + 0.25967334*Power + 0.01867604*Intense +
+             1.30365980*Icon + 0.08553552*Freq + 0.15241566*Len -
+             0.19381657*Lapse + 0.36019221*`*BStress`,
+    GenPref = plogis(y_vals) - 0.5,
+    RelFreq = RelFreq - 0.5
+  ) %>%
+  ungroup()
+
+small_attested_relfreq_1epoch =
+  model_data_finetuned_relfreq_1epoch %>%
+  filter(Attested == 1) %>%
+  mutate(CenteredOverallFreq = scale(log(OverallFreq)))
+
+small_novel_relfreq_1epoch =
+  model_data_finetuned_relfreq_1epoch %>%
+  filter(Attested == 0)
+
+small_attested_relfreq_1epoch$prompt = factor(small_attested_relfreq_1epoch$prompt)
+small_novel_relfreq_1epoch$prompt    = factor(small_novel_relfreq_1epoch$prompt)
+
+small_attested_relfreq_1epoch =
+  small_attested_relfreq_1epoch %>%
+  rename(no_final_stress = "*BStress")
+
+small_novel_relfreq_1epoch =
+  small_novel_relfreq_1epoch %>%
+  rename(no_final_stress = "*BStress")
+
+model_small_attested_relfreq_finetuned_1epoch = brm(
+  log_odds ~
+    (GenPref + RelFreq + CenteredOverallFreq +
+     GenPref:CenteredOverallFreq + RelFreq:CenteredOverallFreq) +
+    (GenPref | prompt) + (1 | Alpha),
+  data   = small_attested_relfreq_1epoch,
+  iter   = 10000,
+  warmup = 5000,
+  chains = 4,
+  cores  = 4,
+  control = list(max_treedepth = 20),
+  file   = '../Data/model_small_attested_relfreq_finetuned_1epoch'
+)
+
+model_small_novel_relfreq_finetuned_1epoch = brm(
+  log_odds ~ GenPref + (GenPref | prompt) + (1 | Alpha),
+  data   = small_novel_relfreq_1epoch,
+  iter   = 10000,
+  warmup = 5000,
+  chains = 4,
+  cores  = 4,
+  file   = '../Data/model_small_novel_relfreq_finetuned_1epoch'
+)
+
+fixef(model_small_attested_relfreq_finetuned_1epoch)
+fixef(model_small_novel_relfreq_finetuned_1epoch)
+
+```
+
+
+## Finetuned on Non-binomials
+
+
+```{r}
+corpus = read_csv('../Data/nonce_and_attested_binoms.csv')
+
+model_data_finetuned_control = read_csv('../Data/FINETUNED_CONTROL_MODEL_BINOMIAL_PREFERENCES.csv') %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = RelFreq - 0.5) %>%
+  ungroup() 
+
+
+small_attested_control= model_data_finetuned_control %>%
+  filter(Attested == 1) %>%
+  mutate(CenteredOverallFreq = scale(log(OverallFreq))) 
+
+
+small_novel_control = model_data_finetuned_control %>%
+  filter(Attested == 0)
+
+small_attested_control$prompt = factor(small_attested_control$prompt)
+small_novel_control$prompt = factor(small_novel_control$prompt)
+
+small_novel_control = small_novel_control %>%
+  rename(no_final_stress = "*BStress")
+
+small_attested_control = small_attested_control %>%
+  rename(no_final_stress = "*BStress")
+
+
+
+model_small_attested_control_finetuned = brm(log_odds ~ (GenPref + RelFreq + CenteredOverallFreq + GenPref:CenteredOverallFreq + RelFreq:CenteredOverallFreq) + (GenPref | prompt) + (1 | Alpha),
+                       data = small_attested_control,
+                       #prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       control = list(max_treedepth = 20),
+                       file = '../Data/model_small_attested_control_finetuned'
+                      )
+
+
+model_small_novel_control_finetuned = brm(log_odds ~ GenPref + (GenPref | prompt) + (1 | Alpha),
+                       data = small_novel_control,
+                       #prior = prior_probs,
+                       iter = 10000,
+                       warmup = 5000,
+                       chains = 4,
+                       
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/model_small_novel_control_finetuned'
+                      )
+
+
+### Vif then backward model selection
+
+# model_small_novel_individual_constraints_finetuned = brm(log_odds ~ Culture + Power + Freq + Len + no_final_stress + Intense + Percept + Lapse + (Culture + Power + Freq + Len + no_final_stress + Intense + Percept + Lapse | prompt) + ( 1 | Alpha),
+#                        data = small_novel_genpref,
+#                        #prior = prior_probs,
+#                        iter = 10000,
+#                        warmup = 5000,
+#                        chains = 4,
+#                        cores = 4,
+#                        #control = list(adapt_delta=0.99, max_treedepth = 15),
+#                        #control = list(max_treedepth = 20),
+#                        file = '../Data/model_small_novel_individual_constraints_finetuned'
+#                       )
+#  
+
+fixef(model_small_attested_control_finetuned)
+fixef(model_small_novel_control_finetuned)
+```
+### control non-binoms 1 epoch
+
+```{r}
+options(contrasts = c("contr.sum","contr.sum"))
+
+corpus = read_csv('../Data/nonce_and_attested_binoms.csv')
+
+model_data_finetuned_control_1epoch =
+  read_csv('../Data/FINETUNED_CONTROL_1EPOCH_MODEL_BINOMIAL_PREFERENCES.csv') %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c('Word1','and','Word2'), remove = FALSE, sep = ' ') %>%
+  select(-and) %>%
+  left_join(corpus) %>%
+  mutate(
+    checkpoint = '1epoch',
+    y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +
+             0.41836997*Culture + 0.25967334*Power + 0.01867604*Intense +
+             1.30365980*Icon + 0.08553552*Freq + 0.15241566*Len -
+             0.19381657*Lapse + 0.36019221*`*BStress`,
+    GenPref = plogis(y_vals) - 0.5,
+    RelFreq = RelFreq - 0.5
+  ) %>%
+  ungroup()
+
+small_attested_control_1epoch =
+  model_data_finetuned_control_1epoch %>%
+  filter(Attested == 1) %>%
+  mutate(CenteredOverallFreq = scale(log(OverallFreq)))
+
+small_novel_control_1epoch =
+  model_data_finetuned_control_1epoch %>%
+  filter(Attested == 0)
+
+small_attested_control_1epoch$prompt = factor(small_attested_control_1epoch$prompt)
+small_novel_control_1epoch$prompt    = factor(small_novel_control_1epoch$prompt)
+
+small_attested_control_1epoch =
+  small_attested_control_1epoch %>%
+  rename(no_final_stress = "*BStress")
+
+small_novel_control_1epoch =
+  small_novel_control_1epoch %>%
+  rename(no_final_stress = "*BStress")
+
+model_small_attested_control_finetuned_1epoch = brm(
+  log_odds ~
+    (GenPref + RelFreq + CenteredOverallFreq +
+     GenPref:CenteredOverallFreq + RelFreq:CenteredOverallFreq) +
+    (GenPref | prompt) + (1 | Alpha),
+  data   = small_attested_control_1epoch,
+  iter   = 10000,
+  warmup = 5000,
+  chains = 4,
+  cores  = 4,
+  control = list(max_treedepth = 20),
+  file   = '../Data/model_small_attested_control_finetuned_1epoch'
+)
+
+model_small_novel_control_finetuned_1epoch = brm(
+  log_odds ~ GenPref + (GenPref | prompt) + (1 | Alpha),
+  data   = small_novel_control_1epoch,
+  iter   = 10000,
+  warmup = 5000,
+  chains = 4,
+  cores  = 4,
+  file   = '../Data/model_small_novel_control_finetuned_1epoch'
+)
+
+fixef(model_small_attested_control_finetuned_1epoch)
+fixef(model_small_novel_control_finetuned_1epoch)
+
+```
+
+
+# Comparing to human predictions
+
+## baseline for novel and attested
 
 ```{r}
 
@@ -1896,20 +708,11 @@ all_human_data = all_human_data %>%
     resp == 'nonalpha' ~ 0
   ))
 
+all_human_data_novel = all_human_data %>%
+  filter(Attested == 0)
 
-#   filter(Attested == 0) 
-# 
-# small_novel_genpref_item_preds = brm(log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
-#                        data = small_novel_genpref,
-#                        #prior = prior_probs,
-#                        iter = 6000,
-#                        warmup = 3000,
-#                        chains = 4,
-#                        cores = 4,
-#                        #control = list(adapt_delta=0.99, max_treedepth = 15),
-#                        #control = list(max_treedepth = 20),
-#                        file = '../Data/small_novel_genpref_item_preds'
-#                       )
+all_human_data_attested = all_human_data %>%
+  filter(Attested == 1)
 
 prior_probs <- c(
   prior(normal(0, 1), class = "Intercept"),
@@ -1918,72 +721,83 @@ prior_probs <- c(
   prior(student_t(3, 0, 1), class = "sigma")
 )
 
-#now let's sample 100 binomials/items
-item_list = unique(baseline_model_data$Alpha)
-#set.seed(42)
-sampled_items = item_list #we can replace this with simply "sampled_items = item_list" later when we want to run the full thing
+baseline_model_data_novel = baseline_model_data %>% 
+  filter(Attested == 0)
 
-baseline_model_data = baseline_model_data %>% 
-  filter(Alpha %in% sampled_items) 
+baseline_model_data_attested = baseline_model_data %>% 
+  filter(Attested == 1)
 
-baseline_item_preds = brm(log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
-                       data = baseline_model_data,
+baseline_item_preds_novel = brm(log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+                       data = baseline_model_data_novel,
                        prior = prior_probs,
-                       iter =  10000,
-                       warmup = 5000,
+                       iter =  18000,
+                       warmup = 9000,
                        chains = 4,
                        cores = 4,
                        #control = list(adapt_delta=0.99, max_treedepth = 15),
                        #control = list(max_treedepth = 20),
-                       file = '../Data/baseline_item_preds'
+                       file = '../Data/baseline_item_preds_novel'
+                      )
+
+baseline_item_preds_attested = brm(log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+                       data = baseline_model_data_attested,
+                       prior = prior_probs,
+                       iter =  30000,
+                       warmup = 15000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/baseline_item_preds_attested'
                       )
 
 
-newdata = data.frame(
-  Alpha = unique(baseline_model_data$Alpha),
+newdata_novel = data.frame(
+  Alpha = unique(baseline_model_data_novel$Alpha),
   prompt = NA
 )
 
-# fitA = fitted(
-#   small_novel_genpref_item_preds,
-#   newdata = newdata,
-#   re_formula = ~ (1 | Alpha),
-#   summary = TRUE
-# )
-# 
-# item_df_genpref = data.frame(
-#   Alpha = newdata$Alpha,
-#   item_logodds_genpref = fitA[, "Estimate"],
-#   item_lo_genpref      = fitA[, "Q2.5"],
-#   item_hi_genpref      = fitA[, "Q97.5"]
-# )
 
-fitB = fitted(
-  baseline_item_preds,
-  newdata = newdata,
+fitB_novel = fitted(
+  baseline_item_preds_novel,
+  newdata = newdata_novel,
   re_formula = ~(1 | Alpha),
   summary = TRUE
 )
 
-item_df_baseline = data.frame(
-  Alpha = newdata$Alpha,
-  item_logodds_baseline = fitB[, "Estimate"],
-  item_lo_baseline      = fitB[, "Q2.5"],
-  item_hi_baseline      = fitB[, "Q97.5"]
+item_df_baseline_novel = data.frame(
+  Alpha = newdata_novel$Alpha,
+  item_logodds_baseline = fitB_novel[, "Estimate"],
+  item_lo_baseline      = fitB_novel[, "Q2.5"],
+  item_hi_baseline      = fitB_novel[, "Q97.5"]
 )
 
 
+newdata_attested = data.frame(
+  Alpha = unique(baseline_model_data_attested$Alpha),
+  prompt = NA
+)
 
+fitB_attested = fitted(
+  baseline_item_preds_attested,
+  newdata = newdata_attested,
+  re_formula = ~(1 | Alpha),
+  summary = TRUE
+)
 
-human_data = all_human_data %>%
-  left_join(item_df_baseline, by = 'Alpha') %>%
-  filter(Alpha %in% sampled_items)
+item_df_baseline_attested = data.frame(
+  Alpha = newdata_attested$Alpha,
+  item_logodds_baseline = fitB_attested[, "Estimate"],
+  item_lo_baseline      = fitB_attested[, "Q2.5"],
+  item_hi_baseline      = fitB_attested[, "Q97.5"]
+)
 
-test = human_data %>%
-  filter(is.na(resp))
+human_data_novel = all_human_data_novel %>%
+  left_join(item_df_baseline_novel, by = 'Alpha')
 
-nrow(test)
-nrow(human_data)
+human_data_attested = all_human_data_attested %>%
+  left_join(item_df_baseline_attested, by = 'Alpha')
+
 
 prior_probs2 <- c(
   # Fixed effects
@@ -1995,10 +809,9 @@ prior_probs2 <- c(
   prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
 )
 
-
-human_data_baseline = brm(
+human_data_novel_baseline = brm(
   resp_binary ~ item_logodds_baseline + (1 | participant) + (1 | Alpha),
-  data = human_data,
+  data = human_data_novel,
   family = bernoulli(link = "logit"),
   chains = 4,   
   cores = 4,
@@ -2007,212 +820,981 @@ human_data_baseline = brm(
   save_pars = save_pars(all = TRUE),
   prior = prior_probs2,
   #control = list(adapt_delta=0.99, max_treedepth = 20),
-  file = '../Data/human_data_baseline'
+  file = '../Data/human_data_novel_baseline'
 )
-# 
-# human_data_genpref = brm(
-#   resp_binary ~ item_logodds_genpref + (1 | participant) + (1 | Alpha),
-#   data = human_data,
-#   family = bernoulli(link = "logit"),
-#   chains = 4,   
-#   cores = 4,
-#   iter = 6000,  
-#   warmup = 3000,
-#   save_pars = save_pars(all = TRUE),
-#   #prior = prior_probs,
-#   #control = list(adapt_delta=0.99, max_treedepth = 20),
-#   file = '../Data/human_data_genpref'
-# )
 
-human_data_baseline = add_criterion(human_data_baseline, 'loo')
-#human_data_genpref = add_criterion(human_data_genpref, 'loo')
+human_data_novel_baseline = add_criterion(human_data_novel_baseline, 'loo')
 
-# loo_results = data.frame(loo_compare(
-#   human_data_baseline,
-#   human_data_genpref
-# ))
+human_data_attested_baseline = brm(
+  resp_binary ~ item_logodds_baseline + (1 | participant) + (1 | Alpha),
+  data = human_data_attested,
+  family = bernoulli(link = "logit"),
+  chains = 4,   
+  cores = 4,
+  iter = 6000,  
+  warmup = 3000,
+  save_pars = save_pars(all = TRUE),
+  prior = prior_probs2,
+  #control = list(adapt_delta=0.99, max_treedepth = 20),
+  file = '../Data/human_data_attested_baseline'
+)
 
-#loo_results
+human_data_attested_baseline = add_criterion(human_data_attested_baseline, 'loo')
+
 
 ```
 
-## Testing multiple genpref models
+## Finetuned Genpref 
+
 
 ```{r}
-# 
-# template_item_model <- brm(
-#   log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
-#   data = df_genpref,   # any representative dataset
-#   prior = prior_probs,
-#   iter = 1000,
-#   warmup = 5000,
-#   chains = 4,
-#   cores = 4,
-#   backend = "cmdstanr",
-#   file = "../Data/template_genpref_item_model"
-# )
-# 
-# template_human_model <- brm(
-#   resp_binary ~ item_logodds_genpref + (1 | participant) + (1 | Alpha),
-#   data = human_data_model,
-#   family = bernoulli(link = "logit"),
-#   prior = prior_probs2,
-#   chains = 4,
-#   cores = 4,
-#   iter = 6000,
-#   warmup = 3000,
-#   backend = "cmdstanr",
-#   save_pars = save_pars(all = TRUE),
-#   file = "../Data/template_human_model"
-# )
+genpref_model_data_novel = model_data_finetuned_genpref %>%
+  filter(Attested == 0)
+
+genpref_model_data_attested = model_data_finetuned_genpref %>%
+  filter(Attested == 1)
+
+genpref_item_preds_novel = brm(log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+                       data = genpref_model_data_novel,
+                       prior = prior_probs,
+                       iter =  18000,
+                       warmup = 9000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/genpref_item_preds_novel'
+                      )
+
+genpref_item_preds_attested = brm(log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+                       data = genpref_model_data_attested,
+                       prior = prior_probs,
+                       iter =  20000,
+                       warmup = 10000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/genpref_item_preds_attested'
+                      )
+
+newdata_novel_genpref = data.frame(
+  Alpha = unique(genpref_model_data_novel$Alpha),
+  prompt = NA
+)
+
+fitG_novel = fitted(
+  genpref_item_preds_novel,
+  newdata = newdata_novel_genpref,
+  re_formula = ~ (1 | Alpha),
+  summary = TRUE
+)
+
+item_df_genpref_novel = data.frame(
+  Alpha = newdata_novel_genpref$Alpha,
+  item_logodds_genpref = fitG_novel[, "Estimate"],
+  item_lo_genpref      = fitG_novel[, "Q2.5"],
+  item_hi_genpref      = fitG_novel[, "Q97.5"]
+)
+
+newdata_attested_genpref = data.frame(
+  Alpha = unique(genpref_model_data_attested$Alpha),
+  prompt = NA
+)
+
+fitG_attested = fitted(
+  genpref_item_preds_attested,
+  newdata = newdata_attested_genpref,
+  re_formula = ~(1 | Alpha),
+  summary = TRUE
+)
+
+item_df_genpref_attested = data.frame(
+  Alpha = newdata_attested_genpref$Alpha,
+  item_logodds_genpref = fitG_attested[, "Estimate"],
+  item_lo_genpref      = fitG_attested[, "Q2.5"],
+  item_hi_genpref      = fitG_attested[, "Q97.5"]
+)
+
+human_data_novel_genpref = all_human_data_novel %>%
+  left_join(item_df_genpref_novel, by = 'Alpha')
+
+human_data_attested_genpref = all_human_data_attested %>%
+  left_join(item_df_genpref_attested, by = 'Alpha')
+prior_probs3 <- c(
+  # Fixed effects
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "item_logodds_genpref"),
+  # Random-effect standard deviations
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+human_data_novel_genpref_model = brm(
+  resp_binary ~ item_logodds_genpref + (1 | participant) + (1 | Alpha),
+  data = human_data_novel_genpref,
+  family = bernoulli(link = "logit"),
+  chains = 4,   
+  cores = 4,
+  iter = 6000,  
+  warmup = 3000,
+  save_pars = save_pars(all = TRUE),
+  prior = prior_probs3,
+  #control = list(adapt_delta=0.99, max_treedepth = 20),
+  file = '../Data/human_data_novel_genpref_model'
+)
+human_data_novel_genpref_model = add_criterion(human_data_novel_genpref_model, 'loo')
+
+human_data_attested_genpref_model = brm(
+  resp_binary ~ item_logodds_genpref + (1 | participant) + (1 | Alpha),
+  data = human_data_attested_genpref,
+  family = bernoulli(link = "logit"),
+  chains = 4,   
+  cores = 4,
+  iter = 6000,  
+  warmup = 3000,
+  save_pars = save_pars(all = TRUE),
+  prior = prior_probs3,
+  #control = list(adapt_delta=0.99, max_treedepth = 20),
+  file = '../Data/human_data_attested_genpref_model'
+)
+
+human_data_attested_genpref_model = add_criterion(human_data_attested_genpref_model, 'loo')
+
+loo_results_novel = loo_compare(
+  human_data_novel_baseline,
+  human_data_novel_genpref_model
+)
+
+loo_results_attested = loo_compare(
+  human_data_attested_baseline,
+  human_data_attested_genpref_model
+)
+
+```
+
+### GenPref model with fewer epochs
+
+```{r}
+# ==========================================================
+# Compare "old finetuned genpref" model predictions to humans
+# (parallel to your genpref_model_data_* pipeline)
+# ==========================================================
+
+# --------------------------
+# Split old finetuned model data into novel vs attested
+# --------------------------
+genpref_old_model_data_novel <- model_data_finetuned_genpref_old %>%
+  filter(Attested == 0)
+
+genpref_old_model_data_attested <- model_data_finetuned_genpref_old %>%
+  filter(Attested == 1)
+
+# --------------------------
+# Fit item-prediction models (log_odds ~ 1 + REs)
+# --------------------------
+genpref_old_item_preds_novel <- brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = genpref_old_model_data_novel,
+  prior  = prior_probs,
+  iter   = 18000,
+  warmup = 9000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/genpref_old_item_preds_novel"
+)
+
+genpref_old_item_preds_attested <- brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = genpref_old_model_data_attested,
+  prior  = prior_probs,
+  iter   = 20000,
+  warmup = 10000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/genpref_old_item_preds_attested"
+)
+
+# --------------------------
+# Extract per-item (Alpha) predicted log-odds (marginalizing prompt)
+# --------------------------
+newdata_novel_genpref_old <- data.frame(
+  Alpha  = unique(genpref_old_model_data_novel$Alpha),
+  prompt = NA
+)
+
+fitG_old_novel <- fitted(
+  genpref_old_item_preds_novel,
+  newdata     = newdata_novel_genpref_old,
+  re_formula  = ~(1 | Alpha),
+  summary     = TRUE
+)
+
+item_df_genpref_old_novel <- data.frame(
+  Alpha                 = newdata_novel_genpref_old$Alpha,
+  item_logodds_genpref_old = fitG_old_novel[, "Estimate"],
+  item_lo_genpref_old      = fitG_old_novel[, "Q2.5"],
+  item_hi_genpref_old      = fitG_old_novel[, "Q97.5"]
+)
+
+newdata_attested_genpref_old <- data.frame(
+  Alpha  = unique(genpref_old_model_data_attested$Alpha),
+  prompt = NA
+)
+
+fitG_old_attested <- fitted(
+  genpref_old_item_preds_attested,
+  newdata     = newdata_attested_genpref_old,
+  re_formula  = ~(1 | Alpha),
+  summary     = TRUE
+)
+
+item_df_genpref_old_attested <- data.frame(
+  Alpha                 = newdata_attested_genpref_old$Alpha,
+  item_logodds_genpref_old = fitG_old_attested[, "Estimate"],
+  item_lo_genpref_old      = fitG_old_attested[, "Q2.5"],
+  item_hi_genpref_old      = fitG_old_attested[, "Q97.5"]
+)
+
+# --------------------------
+# Join to human data
+# --------------------------
+human_data_novel_genpref_old <- all_human_data_novel %>%
+  left_join(item_df_genpref_old_novel, by = "Alpha")
+
+human_data_attested_genpref_old <- all_human_data_attested %>%
+  left_join(item_df_genpref_old_attested, by = "Alpha")
+
+# --------------------------
+# Priors for the human-choice model using the OLD item log-odds predictor
+# --------------------------
+prior_probs_old <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "item_logodds_genpref_old"),
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+
+# --------------------------
+# Fit human models (novel + attested)
+# --------------------------
+human_data_novel_genpref_old_model <- brm(
+  resp_binary ~ item_logodds_genpref_old + (1 | participant) + (1 | Alpha),
+  data     = human_data_novel_genpref_old,
+  family   = bernoulli(link = "logit"),
+  chains   = 4,
+  cores    = 4,
+  iter     = 6000,
+  warmup   = 3000,
+  save_pars = save_pars(all = TRUE),
+  prior    = prior_probs_old,
+  file     = "../Data/human_data_novel_genpref_old_model"
+) %>%
+  add_criterion("loo")
+
+human_data_attested_genpref_old_model <- brm(
+  resp_binary ~ item_logodds_genpref_old + (1 | participant) + (1 | Alpha),
+  data     = human_data_attested_genpref_old,
+  family   = bernoulli(link = "logit"),
+  chains   = 4,
+  cores    = 4,
+  iter     = 6000,
+  warmup   = 3000,
+  save_pars = save_pars(all = TRUE),
+  prior    = prior_probs_old,
+  file     = "../Data/human_data_attested_genpref_old_model"
+) %>%
+  add_criterion("loo")
+
+# --------------------------
+# LOO comparisons against your existing baseline human models
+# (assumes human_data_novel_baseline and human_data_attested_baseline already exist + have loo)
+# --------------------------
+loo_results_novel_genpref_old <- loo_compare(
+  human_data_novel_baseline,
+  human_data_novel_genpref_old_model
+)
+
+loo_results_attested_genpref_old <- loo_compare(
+  human_data_attested_baseline,
+  human_data_attested_genpref_old_model
+)
+
+loo_results_novel_genpref_old
+loo_results_attested_genpref_old
 
 
-library(purrr)
+```
 
-run_genpref_pipeline <- function(df_genpref, model_name) {
+### Finetuned on Genpref 1 epoch
 
-  message("Running model: ", model_name)
+```{r}
+genpref_1epoch_model_data = read_csv('../Data/FINETUNED_GENPREF_1EPOCH_MODEL_BINOMIAL_PREFERENCES.csv') %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = FALSE, sep = ' ') %>%
+  select(-and) %>%
+  left_join(corpus) %>%
+  mutate(
+    y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +
+             0.41836997*Culture + 0.25967334*Power + 0.01867604*Intense +
+             1.30365980*Icon + 0.08553552*Freq + 0.15241566*Len -
+             0.19381657*Lapse + 0.36019221*`*BStress`,
+    GenPref = plogis(y_vals) - 0.5,
+    RelFreq = RelFreq - 0.5
+  )
+
+genpref_1epoch_model_data_novel    = genpref_1epoch_model_data %>% filter(Attested == 0)
+genpref_1epoch_model_data_attested = genpref_1epoch_model_data %>% filter(Attested == 1)
+
+genpref_1epoch_item_preds_novel = brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = genpref_1epoch_model_data_novel,
+  prior  = prior_probs,
+  iter   = 18000,
+  warmup = 9000,
+  chains = 4,
+  cores  = 4,
+  file   = '../Data/genpref_1epoch_item_preds_novel'
+)
+
+genpref_1epoch_item_preds_attested = brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = genpref_1epoch_model_data_attested,
+  prior  = prior_probs,
+  iter   = 20000,
+  warmup = 10000,
+  chains = 4,
+  cores  = 4,
+  file   = '../Data/genpref_1epoch_item_preds_attested'
+)
+
+# ---- extract item-level predictions ----
+newdata_novel_genpref_1epoch = data.frame(
+  Alpha  = unique(genpref_1epoch_model_data_novel$Alpha),
+  prompt = NA
+)
+
+fitG_1epoch_novel = fitted(
+  genpref_1epoch_item_preds_novel,
+  newdata    = newdata_novel_genpref_1epoch,
+  re_formula = ~(1 | Alpha),
+  summary    = TRUE
+)
+
+item_df_genpref_1epoch_novel = data.frame(
+  Alpha = newdata_novel_genpref_1epoch$Alpha,
+  item_logodds_genpref_1epoch = fitG_1epoch_novel[, "Estimate"]
+)
+
+newdata_attested_genpref_1epoch = data.frame(
+  Alpha  = unique(genpref_1epoch_model_data_attested$Alpha),
+  prompt = NA
+)
+
+fitG_1epoch_attested = fitted(
+  genpref_1epoch_item_preds_attested,
+  newdata    = newdata_attested_genpref_1epoch,
+  re_formula = ~(1 | Alpha),
+  summary    = TRUE
+)
+
+item_df_genpref_1epoch_attested = data.frame(
+  Alpha = newdata_attested_genpref_1epoch$Alpha,
+  item_logodds_genpref_1epoch = fitG_1epoch_attested[, "Estimate"]
+)
+
+human_data_novel_genpref_1epoch = all_human_data_novel %>%
+  left_join(item_df_genpref_1epoch_novel, by = "Alpha")
+
+human_data_attested_genpref_1epoch = all_human_data_attested %>%
+  left_join(item_df_genpref_1epoch_attested, by = "Alpha")
+
+prior_probs_genpref_1epoch <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "item_logodds_genpref_1epoch"),
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+
+human_data_novel_genpref_1epoch_model = brm(
+  resp_binary ~ item_logodds_genpref_1epoch + (1 | participant) + (1 | Alpha),
+  data   = human_data_novel_genpref_1epoch,
+  family = bernoulli(),
+  prior  = prior_probs_genpref_1epoch,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = '../Data/human_data_novel_genpref_1epoch_model'
+) %>% add_criterion('loo')
+
+human_data_attested_genpref_1epoch_model = brm(
+  resp_binary ~ item_logodds_genpref_1epoch + (1 | participant) + (1 | Alpha),
+  data   = human_data_attested_genpref_1epoch,
+  family = bernoulli(),
+  prior  = prior_probs_genpref_1epoch,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = '../Data/human_data_attested_genpref_1epoch_model'
+) %>% add_criterion('loo')
+
+```
+
+
+## Finetuned on RelFreq
+
+```{r}
+relfreq_model_data_novel = model_data_finetuned_relfreq %>%
+  filter(Attested == 0)
+
+relfreq_model_data_attested = model_data_finetuned_relfreq %>%
+  filter(Attested == 1)
+
+relfreq_item_preds_novel = brm(log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+                       data = relfreq_model_data_novel,
+                       prior = prior_probs,
+                       iter =  18000,
+                       warmup = 9000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/relfreq_item_preds_novel'
+                      )
+
+relfreq_item_preds_attested = brm(log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+                       data = relfreq_model_data_attested,
+                       prior = prior_probs,
+                       iter =  20000,
+                       warmup = 10000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/relfreq_item_preds_attested'
+                      )
+
+newdata_novel_relfreq = data.frame(
+  Alpha = unique(relfreq_model_data_novel$Alpha),
+  prompt = NA
+)
+
+fitR_novel = fitted(
+  relfreq_item_preds_novel,
+  newdata = newdata_novel_relfreq,
+  re_formula = ~ (1 | Alpha),
+  summary = TRUE
+)
+
+item_df_relfreq_novel = data.frame(
+  Alpha = newdata_novel_relfreq$Alpha,
+  item_logodds_relfreq = fitR_novel[, "Estimate"],
+  item_lo_relfreq     = fitR_novel[, "Q2.5"],
+  item_hi_relfreq      = fitR_novel[, "Q97.5"]
+)
+
+newdata_attested_relfreq = data.frame(
+  Alpha = unique(relfreq_model_data_attested$Alpha),
+  prompt = NA
+)
+
+fitR_attested = fitted(
+  relfreq_item_preds_attested,
+  newdata = newdata_attested_relfreq,
+  re_formula = ~(1 | Alpha),
+  summary = TRUE
+)
+
+item_df_relfreq_attested = data.frame(
+  Alpha = newdata_attested_relfreq$Alpha,
+  item_logodds_relfreq = fitR_attested[, "Estimate"],
+  item_lo_relfreq      = fitR_attested[, "Q2.5"],
+  item_hi_relfreq      = fitR_attested[, "Q97.5"]
+)
+
+human_data_novel_relfreq = all_human_data_novel %>%
+  left_join(item_df_relfreq_novel, by = 'Alpha')
+
+human_data_attested_relfreq = all_human_data_attested %>%
+  left_join(item_df_relfreq_attested, by = 'Alpha')
+prior_probs3 <- c(
+  # Fixed effects
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "item_logodds_relfreq"),
+  # Random-effect standard deviations
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+human_data_novel_relfreq_model = brm(
+  resp_binary ~ item_logodds_relfreq + (1 | participant) + (1 | Alpha),
+  data = human_data_novel_relfreq,
+  family = bernoulli(link = "logit"),
+  chains = 4,   
+  cores = 4,
+  iter = 6000,  
+  warmup = 3000,
+  save_pars = save_pars(all = TRUE),
+  prior = prior_probs3,
+  #control = list(adapt_delta=0.99, max_treedepth = 20),
+  file = '../Data/human_data_novel_relfreq_model'
+)
+human_data_novel_relfreq_model = add_criterion(human_data_novel_relfreq_model, 'loo')
+
+human_data_attested_relfreq_model = brm(
+  resp_binary ~ item_logodds_relfreq + (1 | participant) + (1 | Alpha),
+  data = human_data_attested_relfreq,
+  family = bernoulli(link = "logit"),
+  chains = 4,   
+  cores = 4,
+  iter = 6000,  
+  warmup = 3000,
+  save_pars = save_pars(all = TRUE),
+  prior = prior_probs3,
+  #control = list(adapt_delta=0.99, max_treedepth = 20),
+  file = '../Data/human_data_attested_relfreq_model'
+)
+
+human_data_attested_relfreq_model = add_criterion(human_data_attested_relfreq_model, 'loo')
+
+```
+### Finetuned on RelFreq 1 epoch
+
+```{r}
+# --------------------------
+# Load 1-epoch RelFreq model data
+# --------------------------
+relfreq_1epoch_model_data = read_csv(
+  '../Data/FINETUNED_RELFREQ_1EPOCH_MODEL_BINOMIAL_PREFERENCES.csv'
+) %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = FALSE, sep = ' ') %>%
+  select(-and) %>%
+  left_join(corpus) %>%
+  mutate(
+    y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +
+             0.41836997*Culture + 0.25967334*Power + 0.01867604*Intense +
+             1.30365980*Icon + 0.08553552*Freq + 0.15241566*Len -
+             0.19381657*Lapse + 0.36019221*`*BStress`,
+    GenPref = plogis(y_vals) - 0.5,
+    RelFreq = RelFreq - 0.5
+  )
+
+relfreq_1epoch_model_data_novel =
+  relfreq_1epoch_model_data %>% filter(Attested == 0)
+
+relfreq_1epoch_model_data_attested =
+  relfreq_1epoch_model_data %>% filter(Attested == 1)
+
+# --------------------------
+# Item-level models
+# --------------------------
+relfreq_1epoch_item_preds_novel = brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = relfreq_1epoch_model_data_novel,
+  prior  = prior_probs,
+  iter   = 18000,
+  warmup = 9000,
+  chains = 4,
+  cores  = 4,
+  file   = '../Data/relfreq_1epoch_item_preds_novel'
+)
+
+relfreq_1epoch_item_preds_attested = brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = relfreq_1epoch_model_data_attested,
+  prior  = prior_probs,
+  iter   = 20000,
+  warmup = 10000,
+  chains = 4,
+  cores  = 4,
+  file   = '../Data/relfreq_1epoch_item_preds_attested'
+)
+
+# --------------------------
+# Extract item predictions
+# --------------------------
+newdata_novel_relfreq_1epoch = data.frame(
+  Alpha  = unique(relfreq_1epoch_model_data_novel$Alpha),
+  prompt = NA
+)
+
+fitR_1epoch_novel = fitted(
+  relfreq_1epoch_item_preds_novel,
+  newdata    = newdata_novel_relfreq_1epoch,
+  re_formula = ~(1 | Alpha),
+  summary    = TRUE
+)
+
+item_df_relfreq_1epoch_novel = data.frame(
+  Alpha = newdata_novel_relfreq_1epoch$Alpha,
+  item_logodds_relfreq_1epoch = fitR_1epoch_novel[, "Estimate"]
+)
+
+newdata_attested_relfreq_1epoch = data.frame(
+  Alpha  = unique(relfreq_1epoch_model_data_attested$Alpha),
+  prompt = NA
+)
+
+fitR_1epoch_attested = fitted(
+  relfreq_1epoch_item_preds_attested,
+  newdata    = newdata_attested_relfreq_1epoch,
+  re_formula = ~(1 | Alpha),
+  summary    = TRUE
+)
+
+item_df_relfreq_1epoch_attested = data.frame(
+  Alpha = newdata_attested_relfreq_1epoch$Alpha,
+  item_logodds_relfreq_1epoch = fitR_1epoch_attested[, "Estimate"]
+)
+
+# --------------------------
+# Join to human data
+# --------------------------
+human_data_novel_relfreq_1epoch =
+  all_human_data_novel %>%
+  left_join(item_df_relfreq_1epoch_novel, by = "Alpha")
+
+human_data_attested_relfreq_1epoch =
+  all_human_data_attested %>%
+  left_join(item_df_relfreq_1epoch_attested, by = "Alpha")
+
+# --------------------------
+# Human choice models
+# --------------------------
+prior_probs_relfreq_1epoch <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "item_logodds_relfreq_1epoch"),
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+
+human_data_novel_relfreq_1epoch_model = brm(
+  resp_binary ~ item_logodds_relfreq_1epoch + (1 | participant) + (1 | Alpha),
+  data   = human_data_novel_relfreq_1epoch,
+  family = bernoulli(),
+  prior  = prior_probs_relfreq_1epoch,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = '../Data/human_data_novel_relfreq_1epoch_model'
+) %>% add_criterion("loo")
+
+human_data_attested_relfreq_1epoch_model = brm(
+  resp_binary ~ item_logodds_relfreq_1epoch + (1 | participant) + (1 | Alpha),
+  data   = human_data_attested_relfreq_1epoch,
+  family = bernoulli(),
+  prior  = prior_probs_relfreq_1epoch,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = '../Data/human_data_attested_relfreq_1epoch_model'
+) %>% add_criterion("loo")
+
+```
+
+
+## Finetuned on Non-binomial control
+
+```{r}
+control_model_data_novel = model_data_finetuned_control %>%
+  filter(Attested == 0)
+
+control_model_data_attested = model_data_finetuned_control %>%
+  filter(Attested == 1)
+
+control_item_preds_novel = brm(log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+                       data = control_model_data_novel,
+                       prior = prior_probs,
+                       iter =  18000,
+                       warmup = 9000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/control_item_preds_novel'
+                      )
+
+control_item_preds_attested = brm(log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+                       data = control_model_data_attested,
+                       prior = prior_probs,
+                       iter =  20000,
+                       warmup = 10000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       file = '../Data/control_item_preds_attested'
+                      )
+
+newdata_novel_control = data.frame(
+  Alpha = unique(control_model_data_novel$Alpha),
+  prompt = NA
+)
+
+fitC_novel = fitted(
+  control_item_preds_novel,
+  newdata = newdata_novel_control,
+  re_formula = ~ (1 | Alpha),
+  summary = TRUE
+)
+
+item_df_control_novel = data.frame(
+  Alpha = newdata_novel_control$Alpha,
+  item_logodds_control = fitC_novel[, "Estimate"],
+  item_lo_control      = fitC_novel[, "Q2.5"],
+  item_hi_control      = fitC_novel[, "Q97.5"]
+)
+
+newdata_attested_control = data.frame(
+  Alpha = unique(control_model_data_attested$Alpha),
+  prompt = NA
+)
+
+fitC_attested = fitted(
+  control_item_preds_attested,
+  newdata = newdata_attested_control,
+  re_formula = ~(1 | Alpha),
+  summary = TRUE
+)
+
+item_df_control_attested = data.frame(
+  Alpha = newdata_attested_control$Alpha,
+  item_logodds_control = fitC_attested[, "Estimate"],
+  item_lo_control      = fitC_attested[, "Q2.5"],
+  item_hi_control      = fitC_attested[, "Q97.5"]
+)
+
+human_data_novel_control = all_human_data_novel %>%
+  left_join(item_df_control_novel, by = 'Alpha')
+
+human_data_attested_control = all_human_data_attested %>%
+  left_join(item_df_control_attested, by = 'Alpha')
+prior_probs3 <- c(
+  # Fixed effects
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "item_logodds_control"),
+  # Random-effect standard deviations
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+human_data_novel_control_model = brm(
+  resp_binary ~ item_logodds_control + (1 | participant) + (1 | Alpha),
+  data = human_data_novel_control,
+  family = bernoulli(link = "logit"),
+  chains = 4,   
+  cores = 4,
+  iter = 6000,  
+  warmup = 3000,
+  save_pars = save_pars(all = TRUE),
+  prior = prior_probs3,
+  #control = list(adapt_delta=0.99, max_treedepth = 20),
+  file = '../Data/human_data_novel_control_model'
+)
+human_data_novel_control_model = add_criterion(human_data_novel_control_model, 'loo')
+
+human_data_attested_control_model = brm(
+  resp_binary ~ item_logodds_control + (1 | participant) + (1 | Alpha),
+  data = human_data_attested_control,
+  family = bernoulli(link = "logit"),
+  chains = 4,   
+  cores = 4,
+  iter = 6000,  
+  warmup = 3000,
+  save_pars = save_pars(all = TRUE),
+  prior = prior_probs3,
+  #control = list(adapt_delta=0.99, max_treedepth = 20),
+  file = '../Data/human_data_attested_control_model'
+)
+
+human_data_attested_control_model = add_criterion(human_data_attested_control_model, 'loo')
+
+loo_results_novel = loo_compare(
+  human_data_novel_baseline,
+  human_data_novel_genpref_model,
+  human_data_novel_relfreq_model,
+  human_data_novel_control_model
+)
+
+loo_results_attested = loo_compare(
+  human_data_attested_baseline,
+  human_data_attested_genpref_model,
   
-  df_genpref = df_genpref %>%
-    filter(Alpha %in% sampled_items)
-  # --------------------------------------------------
-  # Item-level model
-  # --------------------------------------------------
-  safe_model_name <- gsub("[^A-Za-z0-9_]", "_", model_name)
-  item_model <- update(
-    baseline_item_preds,
-    newdata = df_genpref,
-    recompile = FALSE,
-    chains = 4,
-    cores = 4,
-    file = paste0("../Data/genpref_item_preds_", safe_model_name)
-  )
-
-
-  newdata <- data.frame(
-    Alpha = unique(df_genpref$Alpha),
-    prompt = NA
-  )
-
-  fitA <- fitted(
-    item_model,
-    newdata = newdata,
-    re_formula = ~ (1 | Alpha),
-    summary = TRUE
-  )
-
-  item_df_genpref <- data.frame(
-    Alpha = newdata$Alpha,
-    item_logodds_genpref = fitA[, "Estimate"],
-    item_lo_genpref      = fitA[, "Q2.5"],
-    item_hi_genpref      = fitA[, "Q97.5"]
-  )
-
-  # --------------------------------------------------
-  # Join with human data
-  # --------------------------------------------------
-  human_data_model <- all_human_data %>%
-    left_join(item_df_baseline, by = "Alpha") %>%
-    left_join(item_df_genpref, by = "Alpha") %>%
-    filter(Alpha %in% sampled_items)
-
-
-  # --------------------------------------------------
-  # Human-level model
-  # --------------------------------------------------
-  human_model <- update(
-    human_data_baseline,
-    newdata = human_data_model,
-    recompile = FALSE,
-    chains = 4, 
-    cores = 4,
-    file = paste0("../Data/human_data_genpref_", safe_model_name)
-  )
-
-
-  human_model <- add_criterion(human_model, "loo")
- 
-   
-  col_name <- paste0("item_logodds_genpref_", safe_model_name)
-
-  human_data_model <- human_data_model %>%
-    rename(!!col_name := item_logodds_genpref)
-
-  # --------------------------------------------------
-  # LOO comparison
-  # --------------------------------------------------
-  loo_df <- data.frame(
-    loo_compare(
-      human_data_baseline,
-      human_model
-    )
-  )
-
-  loo_df$model <- model_name
-  list(
-  model = model_name,
-  loo = loo_df,
-  human_data = human_data_model %>%
-    select(
-      participant, resp, Word1, Word2, Alpha, Nonalpha,
-      OverallFreq, Word1_freq, Word2_freq,
-      Form, Percept, Culture, Power, Intense, Icon,
-      Freq, Len, Lapse, "*BStress", RelFreq, GenPref, Attested,
-      item_logodds_baseline,
-      all_of(col_name),
-      resp_binary
-    )
-)
-
-}
-
-results <- model_results_genpref %>%
-  split(.$model) %>%
-  imap(~ run_genpref_pipeline(.x, .y))
-
-
-loo_results_all <- bind_rows(map(results, "loo"))
-loo_results_all
-
-
-human_data_wide <- reduce(
-  map(results, "human_data"),
-  left_join,
-  by = c(
-    "participant", "resp", "Word1", "Word2", "Alpha", "Nonalpha",
-    "OverallFreq", "Word1_freq", "Word2_freq",
-    "Form", "Percept", "Culture", "Power", "Intense", "Icon",
-    "Freq", "Len", "Lapse", "*BStress", "RelFreq", "GenPref", "Attested",
-    "item_logodds_baseline", "resp_binary"
-  )
+  human_data_attested_relfreq_model,
+  human_data_attested_control_model
 )
 
 ```
+
+### control non-binoms with 1 epoch
+
+```{r}
+# --------------------------
+# Load 1-epoch Control model data
+# --------------------------
+control_1epoch_model_data = read_csv(
+  '../Data/FINETUNED_CONTROL_1EPOCH_MODEL_BINOMIAL_PREFERENCES.csv'
+) %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = FALSE, sep = ' ') %>%
+  select(-and) %>%
+  left_join(corpus) %>%
+  mutate(
+    y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +
+             0.41836997*Culture + 0.25967334*Power + 0.01867604*Intense +
+             1.30365980*Icon + 0.08553552*Freq + 0.15241566*Len -
+             0.19381657*Lapse + 0.36019221*`*BStress`,
+    GenPref = plogis(y_vals) - 0.5,
+    RelFreq = RelFreq - 0.5
+  )
+
+control_1epoch_model_data_novel =
+  control_1epoch_model_data %>% filter(Attested == 0)
+
+control_1epoch_model_data_attested =
+  control_1epoch_model_data %>% filter(Attested == 1)
+
+# --------------------------
+# Item-level models
+# --------------------------
+control_1epoch_item_preds_novel = brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = control_1epoch_model_data_novel,
+  prior  = prior_probs,
+  iter   = 18000,
+  warmup = 9000,
+  chains = 4,
+  cores  = 4,
+  file   = '../Data/control_1epoch_item_preds_novel'
+)
+
+control_1epoch_item_preds_attested = brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = control_1epoch_model_data_attested,
+  prior  = prior_probs,
+  iter   = 20000,
+  warmup = 10000,
+  chains = 4,
+  cores  = 4,
+  file   = '../Data/control_1epoch_item_preds_attested'
+)
+
+# --------------------------
+# Extract item predictions
+# --------------------------
+newdata_novel_control_1epoch = data.frame(
+  Alpha  = unique(control_1epoch_model_data_novel$Alpha),
+  prompt = NA
+)
+
+fitC_1epoch_novel = fitted(
+  control_1epoch_item_preds_novel,
+  newdata    = newdata_novel_control_1epoch,
+  re_formula = ~(1 | Alpha),
+  summary    = TRUE
+)
+
+item_df_control_1epoch_novel = data.frame(
+  Alpha = newdata_novel_control_1epoch$Alpha,
+  item_logodds_control_1epoch = fitC_1epoch_novel[, "Estimate"]
+)
+
+newdata_attested_control_1epoch = data.frame(
+  Alpha  = unique(control_1epoch_model_data_attested$Alpha),
+  prompt = NA
+)
+
+fitC_1epoch_attested = fitted(
+  control_1epoch_item_preds_attested,
+  newdata    = newdata_attested_control_1epoch,
+  re_formula = ~(1 | Alpha),
+  summary    = TRUE
+)
+
+item_df_control_1epoch_attested = data.frame(
+  Alpha = newdata_attested_control_1epoch$Alpha,
+  item_logodds_control_1epoch = fitC_1epoch_attested[, "Estimate"]
+)
+
+# --------------------------
+# Join to human data
+# --------------------------
+human_data_novel_control_1epoch =
+  all_human_data_novel %>%
+  left_join(item_df_control_1epoch_novel, by = "Alpha")
+
+human_data_attested_control_1epoch =
+  all_human_data_attested %>%
+  left_join(item_df_control_1epoch_attested, by = "Alpha")
+
+# --------------------------
+# Human choice models
+# --------------------------
+prior_probs_control_1epoch <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "item_logodds_control_1epoch"),
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+
+human_data_novel_control_1epoch_model = brm(
+  resp_binary ~ item_logodds_control_1epoch + (1 | participant) + (1 | Alpha),
+  data   = human_data_novel_control_1epoch,
+  family = bernoulli(),
+  prior  = prior_probs_control_1epoch,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = '../Data/human_data_novel_control_1epoch_model'
+) %>% add_criterion("loo")
+
+human_data_attested_control_1epoch_model = brm(
+  resp_binary ~ item_logodds_control_1epoch + (1 | participant) + (1 | Alpha),
+  data   = human_data_attested_control_1epoch,
+  family = bernoulli(),
+  prior  = prior_probs_control_1epoch,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = '../Data/human_data_attested_control_1epoch_model'
+) %>% add_criterion("loo")
+
+```
+
+## Loo Results
 
 ```{r}
 
-human_model = brm(
-  resp_binary ~ item_logodds_baseline + (1 | participant) + (1 | Alpha),
-  data = human_data,
-  family = bernoulli(link = "logit"),
-  chains = 4,   
-  cores = 4,
-  iter = 6000,  
-  warmup = 3000,
-  save_pars = save_pars(all = TRUE),
-  prior = prior_probs2,
-  #control = list(adapt_delta=0.99, max_treedepth = 20),
-  file = '../Data/human_data_genpref_qing_yao_genfreq_finetuned_ep10_seed_42_1e_4.rds'
+
+loo_results_novel = loo_compare(
+  human_data_novel_baseline,
+  human_data_novel_genpref_model,
+  human_data_novel_genpref_old_model,
+  human_data_novel_genpref_1epoch_model,
+  human_data_novel_relfreq_model,
+  human_data_novel_relfreq_1epoch_model,
+  human_data_novel_control_model,
+  human_data_novel_control_1epoch_model
 )
 
-test_loo = data.frame(
-    loo_compare(
-      human_data_baseline,
-      human_model
-    )
-  )
+loo_results_attested = loo_compare(
+  human_data_attested_baseline,
+  human_data_attested_genpref_model,
+  human_data_attested_genpref_old_model,
+  human_data_attested_genpref_1epoch_model,
+  human_data_attested_relfreq_model,
+  human_data_attested_relfreq_1epoch_model,
+  human_data_attested_control_model,
+  human_data_attested_control_1epoch_model
+)
+
+
+
+loo_results_novel
+loo_results_attested
 ```
-
-
-## Expansive Analyses now that we have selected a model
 
