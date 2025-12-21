@@ -233,7 +233,7 @@ all_human_data = nonce_data %>%
 
 ```
 
-Generate predicted ordering pref for our finetuning corpus:
+# Generate predicted ordering pref for our finetuning corpus:
 
 ```{r}
 finetuning_corpus = read_csv("../Data/fintetuning-binoms-with-constraints-coded.csv") %>%
@@ -293,6 +293,50 @@ finetuning_corpus_with_model_preds_rel_freq = finetuning_corpus_with_model_preds
 
 
 #write_csv(finetuning_corpus_with_model_preds_rel_freq, '../Data/fintetuning-corpus-with-model-preds-relfreq.csv')
+```
+
+# Generate predicted ordering for our hand-coded binoms
+
+```{r}
+hand_coded_corpus = read_csv("../Data/attested_binoms_train.csv") %>%
+  mutate(LogCenteredOverallFreq = as.numeric(scale(OverallFreq))) %>%
+  mutate(
+    GenPref = GenPref - 0.5,
+    RelFreq = RelFreq - 0.5
+  ) 
+
+
+#predict human preference with finetuning corpus
+
+pred_summ = fitted(
+  m1,
+  newdata    = hand_coded_corpus,
+  re_formula = NA,   # again, population-level
+  summary    = TRUE  # default
+)
+
+# This gives:
+#   Estimate   Est.Error     Q2.5    Q97.5
+# on the response scale (probabilities, because family = bernoulli)
+hand_coded_corpus_finetuning = cbind(hand_coded_corpus, pred_summ) %>%
+  mutate(item = row_number())
+
+hand_coded_corpus_finetuning = hand_coded_corpus_finetuning %>%
+  uncount(weights = 10, .remove = F) %>%
+  group_by(item) %>%
+  mutate(predicted_resp_value = rbinom(n(), size = 1, prob = Estimate)) %>%
+  ungroup() 
+
+hand_coded_corpus_finetuning = hand_coded_corpus_finetuning %>%
+  rename(WordA = Word1, WordB = Word2)
+
+hand_coded_corpus_finetuning = hand_coded_corpus_finetuning %>%
+  mutate(predicted_resp = case_when(
+    predicted_resp_value == 1 ~ paste0(WordA, ' and ', WordB),
+    predicted_resp_value == 0 ~ paste0(WordB, ' and ', WordA)
+  ))
+
+#write_csv(hand_coded_corpus_finetuning, '../Data/hand_coded_corpus_finetuning_with_model_preds.csv')
 ```
 
 

@@ -1404,8 +1404,8 @@ relfreq_1epoch_item_preds_attested = brm(
   log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
   data   = relfreq_1epoch_model_data_attested,
   prior  = prior_probs,
-  iter   = 20000,
-  warmup = 10000,
+  iter   = 26000,
+  warmup = 13000,
   chains = 4,
   cores  = 4,
   file   = '../Data/relfreq_1epoch_item_preds_attested'
@@ -1674,8 +1674,8 @@ control_1epoch_item_preds_attested = brm(
   log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
   data   = control_1epoch_model_data_attested,
   prior  = prior_probs,
-  iter   = 20000,
-  warmup = 10000,
+  iter   = 26000,
+  warmup = 13000,
   chains = 4,
   cores  = 4,
   file   = '../Data/control_1epoch_item_preds_attested'
@@ -1764,6 +1764,25 @@ human_data_attested_control_1epoch_model = brm(
 ) %>% add_criterion("loo")
 
 ```
+## Finetuned on hand-coded data
+
+```{r}
+attested_binoms = corpus %>%
+  filter(Attested == 1)
+
+
+set.seed(123)  # for reproducibility
+
+test_idx  <- sample(seq_len(nrow(attested_binoms)), size = 131)
+test_df  <- attested_binoms[test_idx, ]
+train_df <- attested_binoms[-test_idx, ]
+
+write_csv(test_df, "../Data/attested_binoms_test.csv")
+write_csv(train_df, "../Data/attested_binoms_train.csv")
+
+
+```
+
 
 ## Loo Results
 
