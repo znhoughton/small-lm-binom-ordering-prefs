@@ -180,5 +180,297 @@ binoms_with_genpref = binoms_with_genpref %>%
 #write_csv(binoms_with_genpref, "../Data/fintetuning-binoms-with-constraints-coded.csv")
 
 ```
+## Create GENPREF dataset matched for overall freq
 
+```{r}
+library(tidyverse)
+
+all_binoms = read_csv('../Data/google_binomials_cmudict.csv')
+
+binoms_in_human_exp = read_csv('../Data/nonce_and_attested_binoms.csv') %>%
+  mutate(WordA = Word1, WordB = Word2)
+
+
+
+library(udpipe)
+
+udmodel = udpipe_download_model(language = "english")
+udmodel = udpipe_load_model(udmodel$file_model)
+
+selected_binoms = all_binoms 
+
+binoms_filtered = selected_binoms %>%
+  anti_join(binoms_in_human_exp, by = c("WordA", "WordB")) %>%
+  filter(!(WordA == WordB)) %>%
+  ungroup() %>%
+  arrange(desc(TotalFreq)) %>%
+  slice(1:500000)
+
+library(dplyr)
+library(udpipe)
+
+# starting point: binoms_filtered already created with WordA, WordB
+# binoms_filtered <- selected_binoms %>%
+#   anti_join(binoms_in_human_exp, by = c("WordA", "WordB"))
+
+# ---- POS for WordA ----
+annotA <- as.data.frame(
+  udpipe_annotate(
+    udmodel,
+    x = binoms_filtered$WordA,
+    doc_id = as.character(seq_len(nrow(binoms_filtered)))  # tie each token to row
+  )
+)
+
+worda_tags <- annotA %>%
+  group_by(doc_id) %>%
+  summarise(worda_pos = first(upos), .groups = "drop")
+
+# ---- POS for WordB ----
+annotB <- as.data.frame(
+  udpipe_annotate(
+    udmodel,
+    x = binoms_filtered$WordB,
+    doc_id = as.character(seq_len(nrow(binoms_filtered)))
+  )
+)
+
+wordb_tags <- annotB %>%
+  group_by(doc_id) %>%
+  summarise(wordb_pos = first(upos), .groups = "drop")
+
+# ---- Join tags back by row index (doc_id) ----
+binoms_filtered <- binoms_filtered %>%
+  mutate(row_id = as.character(row_number())) %>%
+  left_join(worda_tags, by = c("row_id" = "doc_id")) %>%
+  left_join(wordb_tags, by = c("row_id" = "doc_id")) %>%
+  select(-row_id)
+
+
+
+binoms_filtered = binoms_filtered %>%
+  filter(worda_pos == 'NOUN' & wordb_pos == 'NOUN') 
+
+# syllable count = number of vowels with stress digit
+count_syllables <- function(cmu_string) {
+  sum(grepl("[0-2]$", unlist(strsplit(cmu_string, " "))))
+}
+
+final_stress <- function(cmu_string) {
+  phones <- unlist(strsplit(cmu_string, " "))
+  vowel_phones <- phones[grepl("[0-2]$", phones)]
+  if (length(vowel_phones) == 0) return(NA_integer_)
+  last <- tail(vowel_phones, 1)
+  as.integer(sub(".*([0-2])$", "\\1", last))
+}
+
+compute_bstress <- function(cmuA, cmuB) {
+  sA <- final_stress(cmuA)
+  sB <- final_stress(cmuB)
+
+  is_stressA <- sA > 0
+  is_stressB <- sB > 0
+
+  if (is_stressA && !is_stressB) return(1L)
+  if (!is_stressA && is_stressB) return(-1L)
+  0L
+}
+
+# Extract stress pattern: vector of 0/1/2 per vowel
+stress_pattern <- function(cmu_string) {
+  phones <- unlist(strsplit(cmu_string, " "))
+  vowels <- phones[grepl("[0-2]$", phones)]
+  if (length(vowels) == 0) return(integer(0))
+  as.integer(sub(".*([0-2])$", "\\1", vowels))
+}
+
+# Maximum run of unstressed syllables
+max_unstressed_run <- function(pattern) {
+  if (length(pattern) == 0) return(0L)
+  r <- rle(pattern)
+  max(c(0L, r$lengths[r$values == 0]))
+}
+
+# Lapse for ordering X and Y → "X and Y"
+lapse_for_order <- function(cmu_first, cmu_second) {
+  pat_first  <- stress_pattern(cmu_first)
+  pat_second <- stress_pattern(cmu_second)
+  full <- c(pat_first, 0L, pat_second)  # 0 = unstressed “and”
+  max_unstressed_run(full)
+}
+
+# FINAL: Lapse difference with sign flipped
+compute_lapse_diff <- function(wordA, wordB, cmuA, cmuB) {
+
+  if (wordA <= wordB) {
+    # alphabetical: A and B
+    lapse_alpha   <- lapse_for_order(cmuA, cmuB)
+    lapse_nonalph <- lapse_for_order(cmuB, cmuA)
+  } else {
+    # alphabetical: B and A
+    lapse_alpha   <- lapse_for_order(cmuB, cmuA)
+    lapse_nonalph <- lapse_for_order(cmuA, cmuB)
+  }
+
+  # FLIPPED SIGN:
+  # positive = nonalphabetical has worse lapse
+  lapse_nonalph - lapse_alpha
+}
+
+finetuning_binoms = binoms_filtered %>%
+  mutate(Freq = log(WordA_Unigram) - log(WordB_Unigram),
+         )
+
+
+binoms_filtered <- binoms_filtered %>%
+  mutate(
+    Length  = mapply(count_syllables, CMU_B) - mapply(count_syllables, CMU_A),
+    BStress = mapply(compute_bstress, CMU_A, CMU_B),
+    Lapse   = mapply(
+      compute_lapse_diff,
+      WordA, WordB, CMU_A, CMU_B
+    )
+  )
+
+
+binoms_filtered = binoms_filtered %>%
+  ungroup() %>%
+  mutate(RelFreq = AlphaOrderFreq / TotalFreq,
+         OverallFreq = TotalFreq,
+         binom_prob = TotalFreq / sum(TotalFreq))
+
+n_trials <- 10000
+
+simulated_data1 <- binoms_filtered %>%
+  ungroup() %>%
+  slice_sample(
+    n = n_trials,
+    weight_by = binom_prob,
+    replace = TRUE
+  )
+
+simulated_data1_collapsed = simulated_data1 %>%
+  mutate(Alpha = paste0(WordA, " ", WordB)) %>%
+  group_by(Alpha) %>% 
+  mutate(num_sentences = n()) %>%
+  slice_head(n = 1)
+
+write_csv(simulated_data1_collapsed, "../Data/fintetuning-binoms-sampled-without-constraints-coded.csv")
+
+binoms_with_genpref = read_csv('../Data/sampled_binomials_coded.csv') %>%
+  uncount(num_sentences) %>%
+  mutate(Freq = log(WordA_Unigram) - log(WordB_Unigram),
+         Len = Length,
+         '*BStress' = BStress)
+
+
+binoms_with_genpref = binoms_with_genpref %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(LogCenteredOverallFreq = as.numeric(scale(log(OverallFreq)))) %>%
+  mutate(
+    GenPref = GenPref - 0.5,
+    RelFreq = RelFreq - 0.5
+  ) %>%
+  filter(WordA != WordB)
+
+
+#write_csv(binoms_filtered, "../Data/fintetuning-binoms-with-constraints-coded.csv")
+
+m1 = brm(
+  resp ~ GenPref + RelFreq + LogCenteredOverallFreq + GenPref:LogCenteredOverallFreq + RelFreq:LogCenteredOverallFreq + (GenPref + RelFreq + LogCenteredOverallFreq + GenPref:LogCenteredOverallFreq + RelFreq:LogCenteredOverallFreq | participant) + (1 | Item),
+  data = human_data,
+  family = bernoulli(link = "logit"),
+  chains = 4,   
+  cores = 4,
+  iter = 20000,  
+  warmup = 10000,
+  prior = prior_probs,
+  control = list(adapt_delta=0.99, max_treedepth = 20),
+  file = '../Data/human_data_model_results'
+)
+
+
+#predict human preference with finetuning corpus
+
+pred_summ = fitted(
+  m1,
+  newdata    = binoms_with_genpref,
+  re_formula = NA,   # again, population-level
+  summary    = TRUE  # default
+)
+
+# This gives:
+#   Estimate   Est.Error     Q2.5    Q97.5
+# on the response scale (probabilities, because family = bernoulli)
+finetuning_corpus_with_model_preds = cbind(binoms_with_genpref, pred_summ) %>%
+  mutate(item = row_number()) %>%
+  mutate(predicted_resp_value = rbinom(n(), size = 1, prob = Estimate))
+
+finetuning_corpus_with_model_preds = finetuning_corpus_with_model_preds %>%
+  mutate(predicted_resp = case_when(
+    predicted_resp_value == 1 ~ paste0(WordA, ' and ', WordB),
+    predicted_resp_value == 0 ~ paste0(WordB, ' and ', WordA)
+  ))
+
+
+binoms_with_estimate #= read_csv blah blah
+
+finetuning_genpref_cond = read_csv("../Data/finetuning_condition_handcoded.csv") %>%
+  mutate(binom_prob = OverallFreq / sum(OverallFreq)) %>%
+  select(-GeneratedSentence) %>%
+  mutate(predicted_resp = rbinom(), size = 1, prob = Estimate)
+
+
+
+write_csv(simulated_data, '../Data/oss120b-coded-genpref-data-sampled-without-sentences.csv')
+```
+
+## Create HANDCODED dataset matched with overall frequency
+
+```{r}
+finetuning_handcoded_og_cond = read_csv("../Data/finetuning_condition_handcoded.csv") %>%
+  group_by(Alpha) %>%
+  slice_head(n = 1) %>% 
+  ungroup() %>%
+  mutate(binom_prob = OverallFreq / sum(OverallFreq)) %>%
+  select(-GeneratedSentence)
+
+
+set.seed(123)
+
+n_trials <- 10000
+
+simulated_data <- finetuning_handcoded_og_cond %>%
+  slice_sample(
+    n = n_trials,
+    weight_by = binom_prob,
+    replace = TRUE
+  ) %>%
+  mutate(
+    predicted_resp_value = rbinom(n(), size = 1, prob = Estimate)
+  ) %>%
+  mutate(predicted_resp = case_when(
+    predicted_resp_value == 1 ~ paste0(WordA, ' and ', WordB),
+    predicted_resp_value == 0 ~ paste0(WordB, ' and ', WordA)
+  ))
+ 
+write_csv(simulated_data, '../Data/hand-coded-data-sampled-without-sentences.csv')
+
+
+
+```
+
+# Create RELFREQ
+
+```{r}
+finetuning_genpref_cond = read_csv("../Data/finetuning_condition_handcoded.csv") %>%
+  mutate(binom_prob = OverallFreq / sum(OverallFreq)) %>%
+  select(-GeneratedSentence) %>%
+  mutate(predicted_resp = rbinom(), size = 1, prob = RelFreq)
+
+
+
+write_csv(simulated_data, '../Data/oss120b-coded-relfreq-data-sampled-without-sentences.csv')
+```
 

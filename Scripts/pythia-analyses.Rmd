@@ -42,6 +42,96 @@ all_human_data_attested <- all_human_data %>% filter(Attested == 1)
 
 ```
 
+### simple functions to make this quicker
+
+```{r}
+library(tidyverse)
+library(brms)
+
+# --------------------------------------------------
+# Load + preprocess handcoded Pythia data
+# --------------------------------------------------
+load_handcoded_pythia <- function(csv_path, corpus, model_filter = NULL) {
+
+  df <- read_csv(csv_path) %>%
+    mutate(log_odds = preference) %>%
+    separate(binom, c("Word1", "and", "Word2"),
+             remove = FALSE, sep = " ") %>%
+    select(-and) %>%
+    left_join(corpus, by = c("Word1", "Word2")) %>%
+    mutate(
+      y_vals =
+        0.02191943 +
+        0.23925834 * Form +
+        0.24889543 * Percept +
+        0.41836997 * Culture +
+        0.25967334 * Power +
+        0.01867604 * Intense +
+        1.30365980 * Icon +
+        0.08553552 * Freq +
+        0.15241566 * Len -
+        0.19381657 * Lapse +
+        0.36019221 * `*BStress`,
+      GenPref = plogis(y_vals) - 0.5,
+      RelFreq = RelFreq - 0.5
+    )
+
+  if (!is.null(model_filter)) {
+    df <- df %>% filter(model == model_filter)
+  }
+
+  df
+}
+
+# --------------------------------------------------
+# Fit item-level model
+# --------------------------------------------------
+fit_item_model <- function(df, file_stub,
+                           iter, warmup) {
+
+  brm(
+    log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+    data   = df,
+    prior  = prior_probs,
+    iter   = iter,
+    warmup = warmup,
+    chains = 4,
+    cores  = 4,
+    file   = file_stub
+  )
+}
+
+# --------------------------------------------------
+# Extract item log-odds
+# --------------------------------------------------
+extract_item_preds <- function(fit, alphas) {
+
+  newdata <- data.frame(
+    Alpha  = unique(alphas),
+    prompt = NA
+  )
+
+  fitted(
+    fit,
+    newdata    = newdata,
+    re_formula = ~(1 | Alpha),
+    summary    = TRUE
+  )[,"Estimate"] %>%
+    setNames(newdata$Alpha) %>%
+    tibble::enframe(
+      name  = "Alpha",
+      value = "item_logodds_hand"
+    )
+}
+
+prior_probs_hand <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "item_logodds_hand"),
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+```
+
 ## Base analysis
 
 ### Statistical Predictors
@@ -119,168 +209,7 @@ fixef(pythia_model_novel_genpref)
 
 ### Human Analysis
 
-#### Hand coded
 
-```{r}
-# ==================================================
-# Pythia baseline: item preds -> join to humans -> human choice models
-# (Drop-in rewrite of your hand-coded pipeline)
-# ==================================================
-
-library(tidyverse)
-library(brms)
-
-# --------------------------------------------------
-# Load + prepare Pythia baseline data
-# --------------------------------------------------
-pythia_baseline_model_data <- read_csv(
-  "../Data/PYTHIA_BASE_MODEL_BINOMIAL_PREFERENCES.csv"
-) %>%
-  mutate(log_odds = preference) %>%
-  separate(binom, c("Word1", "and", "Word2"), remove = FALSE, sep = " ") %>%
-  select(-and) %>%
-  left_join(corpus, by = c("Word1", "Word2")) %>%   # safer than bare left_join()
-  mutate(
-    checkpoint = "main",
-    y_vals =
-      0.02191943 +
-      0.23925834 * Form +
-      0.24889543 * Percept +
-      0.41836997 * Culture +
-      0.25967334 * Power +
-      0.01867604 * Intense +
-      1.30365980 * Icon +
-      0.08553552 * Freq +
-      0.15241566 * Len -
-      0.19381657 * Lapse +
-      0.36019221 * `*BStress`,
-    GenPref = plogis(y_vals) - 0.5,
-    RelFreq = RelFreq - 0.5
-  ) %>%
-  ungroup()
-
-# --------------------------------------------------
-# Split into novel vs attested (match your previous logic)
-# --------------------------------------------------
-pythia_novel <-
-  pythia_baseline_model_data %>%
-  filter(Attested == 0)
-
-pythia_attested <-
-  pythia_baseline_model_data %>%
-  filter(Alpha %in% test_df$Alpha)
-
-# --------------------------------------------------
-# Item-level models (Pythia baseline)
-# --------------------------------------------------
-# NOTE: I’m reusing your prior name `prior_probs` and the same model form.
-# Adjust iter/warmup if you want them different from the hand-coded version.
-pythia_item_preds_novel <- brm(
-  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
-  data   = pythia_novel,
-  prior  = prior_probs,
-  iter   = 18000,
-  warmup = 9000,
-  chains = 4,
-  cores  = 4,
-  file   = "../Data/pythia_item_preds_novel_main"
-)
-
-pythia_item_preds_attested <- brm(
-  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
-  data   = pythia_attested,
-  prior  = prior_probs,
-  iter   = 26000,
-  warmup = 13000,
-  chains = 4,
-  cores  = 4,
-  file   = "../Data/pythia_item_preds_attested_main"
-)
-
-# --------------------------------------------------
-# Extract item predictions (renamed output column)
-# --------------------------------------------------
-extract_item_preds <- function(fit, alphas, out_col = "item_logodds_model") {
-  newdata <- data.frame(
-    Alpha  = unique(alphas),
-    prompt = NA
-  )
-
-  fitted(
-    fit,
-    newdata    = newdata,
-    re_formula = ~(1 | Alpha),
-    summary    = TRUE
-  )[,"Estimate"] %>%
-    setNames(newdata$Alpha) %>%
-    tibble::enframe(name = "Alpha", value = out_col)
-}
-
-item_df_pythia_attested <-
-  extract_item_preds(
-    pythia_item_preds_attested,
-    pythia_attested$Alpha,
-    out_col = "item_logodds_pythia"
-  )
-
-item_df_pythia_novel <-
-  extract_item_preds(
-    pythia_item_preds_novel,
-    pythia_novel$Alpha,
-    out_col = "item_logodds_pythia"
-  )
-
-# --------------------------------------------------
-# Join to human data
-# --------------------------------------------------
-human_data_attested_pythia <-
-  all_human_data_attested %>%
-  semi_join(test_df, by = "Alpha") %>%
-  left_join(item_df_pythia_attested, by = "Alpha")
-
-human_data_novel_pythia <-
-  all_human_data_novel %>%
-  left_join(item_df_pythia_novel, by = "Alpha")
-
-# Safety checks
-stopifnot(!any(is.na(human_data_attested_pythia$item_logodds_pythia)))
-stopifnot(!any(is.na(human_data_novel_pythia$item_logodds_pythia)))
-
-# --------------------------------------------------
-# Human choice models (Pythia baseline)
-# --------------------------------------------------
-prior_probs_pythia <- c(
-  prior(normal(0, 1), class = "Intercept"),
-  prior(normal(0, 1), class = "b", coef = "item_logodds_pythia"),
-  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
-  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
-)
-
-human_data_attested_pythia_model <- brm(
-  resp_binary ~ item_logodds_pythia + (1 | participant) + (1 | Alpha),
-  data   = human_data_attested_pythia,
-  family = bernoulli(),
-  prior  = prior_probs_pythia,
-  iter   = 6000,
-  warmup = 3000,
-  chains = 4,
-  cores  = 4,
-  file   = "../Data/human_data_attested_pythia_model_main"
-) %>% add_criterion("loo")
-
-human_data_novel_pythia_model <- brm(
-  resp_binary ~ item_logodds_pythia + (1 | participant) + (1 | Alpha),
-  data   = human_data_novel_pythia,
-  family = bernoulli(),
-  prior  = prior_probs_pythia,
-  iter   = 6000,
-  warmup = 3000,
-  chains = 4,
-  cores  = 4,
-  file   = "../Data/human_data_novel_pythia_model_main"
-) %>% add_criterion("loo")
-
-```
 
 #### GPT OSS 120B Coded Data
 
@@ -442,6 +371,45 @@ human_data_attested_pythia_model <- brm(
 
 ```
 
+#### Attested for handcoded comparison
+
+```{r}
+
+handcoded_base_attested <- pythia_baseline_model_data %>% filter(Alpha %in% test_df$Alpha)
+
+fit_base_hand_attested <- fit_item_model(
+  handcoded_base_attested,
+  file_stub = "../Data/handcoded_item_preds_pythia_base_attested",
+  iter = 26000,
+  warmup = 13000
+)
+
+
+item_df_hand_base_attested <-
+  extract_item_preds(fit_base_hand_attested,
+                     handcoded_base_attested$Alpha)
+
+human_data_attested_hand_base <-
+  all_human_data_attested %>%
+  semi_join(test_df, by = "Alpha") %>%
+  left_join(item_df_hand_base_attested, by = "Alpha")
+
+human_data_attested_hand_base_model <- brm(
+  resp_binary ~ item_logodds_hand + (1 | participant) + (1 | Alpha),
+  data   = human_data_attested_hand_base,
+  family = bernoulli(),
+  prior  = prior_probs_hand,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/human_data_base_attested_hand"
+) %>% add_criterion("loo")
+
+
+```
+
+
 ## GenPref Analysis
 
 ### Statistical Predictors
@@ -453,7 +421,7 @@ corpus = read_csv('../Data/nonce_and_attested_binoms.csv')
 # --------------------------------------------------
 # GENPREF-coded Pythia data (new input file)
 # --------------------------------------------------
-pythia_genpref_model_data = read_csv('../Data/PYTHIA_GENPREF_MODEL_BINOMIAL_PREFERENCES.csv') %>%
+pythia_genpref_model_data = read_csv('../Data/PYTHIA_GENPREF_2_EP_MODEL_BINOMIAL_PREFERENCES.csv') %>%
   mutate(log_odds = preference) %>%
   separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
   select(-and) %>%
@@ -498,7 +466,7 @@ pythia_genpref_attested_genpref = brm(
   chains = 4,
   cores  = 4,
   control = list(max_treedepth = 20),
-  file   = '../Data/pythia_genpref_attested_genpref'
+  file   = '../Data/pythia_genpref_attested_genpref_2ep'
 )
 
 pythia_genpref_novel_genpref = brm(
@@ -509,7 +477,7 @@ pythia_genpref_novel_genpref = brm(
   warmup = 5000,
   chains = 4,
   cores  = 4,
-  file   = '../Data/pythia_genpref_novel_genpref'
+  file   = '../Data/pythia_genpref_novel_genpref_2ep'
 )
 
 fixef(pythia_genpref_attested_genpref)
@@ -519,192 +487,6 @@ fixef(pythia_genpref_novel_genpref)
 
 ### Human Analysis
 
-#### Hand coded
-
-```{r}
-# ==================================================
-# Pythia GENPREF dataset: item preds -> join to humans -> human choice models
-# (Drop-in rewrite of your hand-coded pipeline)
-# ==================================================
-
-library(tidyverse)
-library(brms)
-
-# --------------------------------------------------
-# Load + prepare Pythia GENPREF data
-# --------------------------------------------------
-pythia_genpref_model_data <- read_csv(
-  "../Data/PYTHIA_GENPREF_MODEL_BINOMIAL_PREFERENCES.csv"
-) %>%
-  mutate(log_odds = preference) %>%
-  separate(binom, c("Word1", "and", "Word2"), remove = FALSE, sep = " ") %>%
-  select(-and) %>%
-  left_join(corpus, by = c("Word1", "Word2")) %>%   # safer than bare left_join()
-  mutate(
-    checkpoint = "main",
-    y_vals =
-      0.02191943 +
-      0.23925834 * Form +
-      0.24889543 * Percept +
-      0.41836997 * Culture +
-      0.25967334 * Power +
-      0.01867604 * Intense +
-      1.30365980 * Icon +
-      0.08553552 * Freq +
-      0.15241566 * Len -
-      0.19381657 * Lapse +
-      0.36019221 * `*BStress`,
-    GenPref = plogis(y_vals) - 0.5,
-    RelFreq = RelFreq - 0.5
-  ) %>%
-  ungroup()
-
-# --------------------------------------------------
-# Split into novel vs attested
-# --------------------------------------------------
-pythia_genpref_novel <-
-  pythia_genpref_model_data %>%
-  filter(Attested == 0)
-
-pythia_genpref_attested <-
-  pythia_genpref_model_data %>%
-  filter(Alpha %in% test_df$Alpha)
-
-# --------------------------------------------------
-# Item-level models (Pythia GENPREF)
-# --------------------------------------------------
-pythia_genpref_item_preds_novel <- brm(
-  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
-  data   = pythia_genpref_novel,
-  prior  = prior_probs,
-  iter   = 18000,
-  warmup = 9000,
-  chains = 4,
-  cores  = 4,
-  file   = "../Data/pythia_genpref_item_preds_novel_main"
-)
-
-pythia_genpref_item_preds_attested <- brm(
-  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
-  data   = pythia_genpref_attested,
-  prior  = prior_probs,
-  iter   = 26000,
-  warmup = 13000,
-  chains = 4,
-  cores  = 4,
-  file   = "../Data/pythia_genpref_item_preds_attested_main"
-)
-
-# --------------------------------------------------
-# Extract item predictions
-# --------------------------------------------------
-extract_item_preds <- function(fit, alphas, out_col = "item_logodds_model") {
-  newdata <- data.frame(
-    Alpha  = unique(alphas),
-    prompt = NA
-  )
-
-  fitted(
-    fit,
-    newdata    = newdata,
-    re_formula = ~(1 | Alpha),
-    summary    = TRUE
-  )[,"Estimate"] %>%
-    setNames(newdata$Alpha) %>%
-    tibble::enframe(name = "Alpha", value = out_col)
-}
-
-item_df_pythia_genpref_attested <-
-  extract_item_preds(
-    pythia_genpref_item_preds_attested,
-    pythia_genpref_attested$Alpha,
-    out_col = "item_logodds_pythia_genpref"
-  )
-
-item_df_pythia_genpref_novel <-
-  extract_item_preds(
-    pythia_genpref_item_preds_novel,
-    pythia_genpref_novel$Alpha,
-    out_col = "item_logodds_pythia_genpref"
-  )
-
-extract_item_preds_ci <- function(fit, alphas, prefix) {
-  # Ensure we never trip factor-level mismatches
-  alphas_chr <- unique(as.character(alphas))
-
-  newdata <- data.frame(
-    Alpha  = alphas_chr,
-    prompt = NA_character_,
-    stringsAsFactors = FALSE
-  )
-
-  fit_mat <- fitted(
-    fit,
-    newdata    = newdata,
-    re_formula = ~(1 | Alpha),   # only item RE
-    summary    = TRUE,
-    allow_new_levels = TRUE      # critical if any level mismatch remains
-  )
-
-  tibble(
-    Alpha = newdata$Alpha,
-    !!paste0("item_logodds_", prefix) := fit_mat[, "Estimate"],
-    !!paste0("item_lo_", prefix)      := fit_mat[, "Q2.5"],
-    !!paste0("item_hi_", prefix)      := fit_mat[, "Q97.5"]
-  )
-}
-
-# --------------------------------------------------
-# Join to human data
-# --------------------------------------------------
-human_data_attested_pythia_genpref <-
-  all_human_data_attested %>%
-  semi_join(test_df, by = "Alpha") %>%
-  left_join(item_df_pythia_genpref_attested, by = "Alpha")
-
-human_data_novel_pythia_genpref <-
-  all_human_data_novel %>%
-  left_join(item_df_pythia_genpref_novel, by = "Alpha")
-
-# Safety checks
-stopifnot(!any(is.na(human_data_attested_pythia_genpref$item_logodds_pythia_genpref)))
-stopifnot(!any(is.na(human_data_novel_pythia_genpref$item_logodds_pythia_genpref)))
-
-# --------------------------------------------------
-# Human choice models (Pythia GENPREF)
-# --------------------------------------------------
-prior_probs_pythia_genpref <- c(
-  prior(normal(0, 1), class = "Intercept"),
-  prior(normal(0, 1), class = "b", coef = "item_logodds_pythia_genpref"),
-  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
-  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
-)
-
-human_data_attested_pythia_genpref_model <- brm(
-  resp_binary ~ item_logodds_pythia_genpref + (1 | participant) + (1 | Alpha),
-  data   = human_data_attested_pythia_genpref,
-  family = bernoulli(),
-  prior  = prior_probs_pythia_genpref,
-  iter   = 6000,
-  warmup = 3000,
-  chains = 4,
-  cores  = 4,
-  file   = "../Data/human_data_attested_pythia_genpref_model_main"
-) %>% add_criterion("loo")
-
-human_data_novel_pythia_genpref_model <- brm(
-  resp_binary ~ item_logodds_pythia_genpref + (1 | participant) + (1 | Alpha),
-  data   = human_data_novel_pythia_genpref,
-  family = bernoulli(),
-  prior  = prior_probs_pythia_genpref,
-  iter   = 6000,
-  warmup = 3000,
-  chains = 4,
-  cores  = 4,
-  file   = "../Data/human_data_novel_pythia_genpref_model_main"
-) %>% add_criterion("loo")
-
-```
 
 #### GPT OSS 120B Coded Data
 ```{r}
@@ -720,7 +502,7 @@ library(brms)
 # Load + prepare Pythia GENPREF data
 # --------------------------------------------------
 pythia_genpref_model_data <- read_csv(
-  "../Data/PYTHIA_GENPREF_MODEL_BINOMIAL_PREFERENCES.csv"
+  "../Data/PYTHIA_GENPREF_2_EP_MODEL_BINOMIAL_PREFERENCES.csv"
 ) %>%
   mutate(log_odds = preference) %>%
   separate(binom, c("Word1", "and", "Word2"), remove = FALSE, sep = " ") %>%
@@ -777,7 +559,7 @@ pythia_genpref_item_preds_novel <- brm(
   warmup = 9000,
   chains = 4,
   cores  = 4,
-  file   = "../Data/pythia_genpref_item_preds_novel_main"
+  file   = "../Data/pythia_genpref_item_preds_novel_main_2ep"
 )
 
 pythia_genpref_item_preds_attested <- brm(
@@ -788,7 +570,7 @@ pythia_genpref_item_preds_attested <- brm(
   warmup = 10000,
   chains = 4,
   cores  = 4,
-  file   = "../Data/pythia_genpref_item_preds_attested_main"
+  file   = "../Data/pythia_genpref_item_preds_attested_main_2ep"
 )
 
 # --------------------------------------------------
@@ -875,7 +657,7 @@ human_data_novel_pythia_genpref_model <- brm(
   iter      = 6000,
   warmup    = 3000,
   save_pars = save_pars(all = TRUE),
-  file      = "../Data/human_data_novel_pythia_genpref_model"
+  file      = "../Data/human_data_novel_pythia_genpref_model_2ep"
 ) %>% add_criterion("loo")
 
 human_data_attested_pythia_genpref_model <- brm(
@@ -888,9 +670,1452 @@ human_data_attested_pythia_genpref_model <- brm(
   iter      = 6000,
   warmup    = 3000,
   save_pars = save_pars(all = TRUE),
-  file      = "../Data/human_data_attested_pythia_genpref_model"
+  file      = "../Data/human_data_attested_pythia_genpref_model_2ep"
+) %>% add_criterion("loo")
+
+
+loo_compare(
+  human_data_novel_pythia_genpref_model,
+  human_data_novel_pythia_model
+)
+
+loo_compare(
+  human_data_attested_pythia_genpref_model,
+  human_data_attested_pythia_model
+)
+
+
+```
+
+## RelFreq Analysis
+
+### Statistical Predictors
+```{r}
+options(contrasts = c("contr.sum","contr.sum"))
+
+corpus = read_csv('../Data/nonce_and_attested_binoms.csv')
+
+# --------------------------------------------------
+# GENPREF-coded Pythia data (new input file)
+# --------------------------------------------------
+pythia_relfreq_model_data = read_csv('../Data/PYTHIA_RELFREQ_MODEL_BINOMIAL_PREFERENCES.csv') %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  # mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = RelFreq - 0.5) %>%
+  ungroup()
+
+pythia_relfreq_model_data_attested = pythia_relfreq_model_data %>%
+  ungroup() %>%
+  filter(Attested == 1) %>%
+  mutate(CenteredOverallFreq = as.numeric(scale(log(OverallFreq))))
+
+pythia_relfreq_model_data_novel = pythia_relfreq_model_data %>%
+  ungroup() %>%
+  filter(Attested == 0)
+
+pythia_relfreq_model_data_attested$prompt = factor(pythia_relfreq_model_data_attested$prompt)
+pythia_relfreq_model_data_novel$prompt    = factor(pythia_relfreq_model_data_novel$prompt)
+
+pythia_relfreq_model_data_novel = pythia_relfreq_model_data_novel %>%
+  rename(no_final_stress = "*BStress")
+
+pythia_relfreq_model_data_attested = pythia_relfreq_model_data_attested %>%
+  rename(no_final_stress = "*BStress")
+
+# --------------------------------------------------
+# Models (same formulas; new object + file names)
+# --------------------------------------------------
+pythia_relfreq_attested = brm(
+  log_odds ~ GenPref + RelFreq + CenteredOverallFreq +
+    GenPref:CenteredOverallFreq + RelFreq:CenteredOverallFreq +
+    (GenPref | prompt) + (1 | Alpha),
+  data   = pythia_relfreq_model_data_attested,
+  # prior  = prior_probs,
+  iter   = 10000,
+  warmup = 5000,
+  chains = 4,
+  cores  = 4,
+  control = list(max_treedepth = 20),
+  file   = '../Data/pythia_relfreq_attested'
+)
+
+pythia_relfreq_novel = brm(
+  log_odds ~ GenPref + (GenPref | prompt) + (1 | Alpha),
+  data   = pythia_relfreq_model_data_novel,
+  # prior  = prior_probs,
+  iter   = 10000,
+  warmup = 5000,
+  chains = 4,
+  cores  = 4,
+  file   = '../Data/pythia_relfreq_novel'
+)
+
+fixef(pythia_relfreq_attested)
+fixef(pythia_relfreq_novel)
+
+```
+
+### Human Analysis
+
+#### GPT OSS 120B Coded Data
+```{r}
+# ==================================================
+# PYTHIA GENPREF → item preds → humans → LOO
+# (GenPref-OLD structure, Pythia GENPREF data)
+# ==================================================
+
+library(tidyverse)
+library(brms)
+
+# --------------------------------------------------
+# Load + prepare Pythia GENPREF data
+# --------------------------------------------------
+pythia_relfreq_model_data <- read_csv(
+  "../Data/PYTHIA_RELFREQ_MODEL_BINOMIAL_PREFERENCES.csv"
+) %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c("Word1", "and", "Word2"), remove = FALSE, sep = " ") %>%
+  select(-and) %>%
+  left_join(corpus, by = c("Word1", "Word2")) %>%
+  mutate(
+    checkpoint = "main",
+    y_vals =
+      0.02191943 +
+      0.23925834 * Form +
+      0.24889543 * Percept +
+      0.41836997 * Culture +
+      0.25967334 * Power +
+      0.01867604 * Intense +
+      1.30365980 * Icon +
+      0.08553552 * Freq +
+      0.15241566 * Len -
+      0.19381657 * Lapse +
+      0.36019221 * `*BStress`,
+    GenPref = plogis(y_vals) - 0.5,
+    RelFreq = RelFreq - 0.5
+  ) %>%
+  ungroup()
+
+# --------------------------------------------------
+# Split Pythia GENPREF data into novel vs attested
+# --------------------------------------------------
+pythia_relfreq_novel <-
+  pythia_relfreq_model_data %>%
+  filter(Attested == 0)
+
+pythia_relfreq_attested <-
+  pythia_relfreq_model_data %>%
+  filter(Attested == 1)
+
+# --------------------------------------------------
+# Priors (same as baseline)
+# --------------------------------------------------
+prior_probs <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha"),
+  prior(student_t(3, 0, 1), class = "sd", group = "prompt"),
+  prior(student_t(3, 0, 1), class = "sigma")
+)
+
+# --------------------------------------------------
+# Item-level models (GENPREF)
+# --------------------------------------------------
+pythia_relfreq_item_preds_novel <- brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = pythia_relfreq_novel,
+  prior  = prior_probs,
+  iter   = 18000,
+  warmup = 9000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/pythia_relfreq_item_preds_novel_main"
+)
+
+pythia_relfreq_item_preds_attested <- brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = pythia_relfreq_attested,
+  prior  = prior_probs,
+  iter   = 20000,
+  warmup = 10000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/pythia_relfreq_item_preds_attested_main"
+)
+
+# --------------------------------------------------
+# Extract per-item predicted log-odds + CIs
+# --------------------------------------------------
+
+extract_item_preds_ci <- function(fit, alphas, prefix) {
+  # Ensure we never trip factor-level mismatches
+  alphas_chr <- unique(as.character(alphas))
+
+  newdata <- data.frame(
+    Alpha  = alphas_chr,
+    prompt = NA_character_,
+    stringsAsFactors = FALSE
+  )
+
+  fit_mat <- fitted(
+    fit,
+    newdata    = newdata,
+    re_formula = ~(1 | Alpha),   # only item RE
+    summary    = TRUE,
+    allow_new_levels = TRUE      # critical if any level mismatch remains
+  )
+
+  tibble(
+    Alpha = newdata$Alpha,
+    !!paste0("item_logodds_", prefix) := fit_mat[, "Estimate"],
+    !!paste0("item_lo_", prefix)      := fit_mat[, "Q2.5"],
+    !!paste0("item_hi_", prefix)      := fit_mat[, "Q97.5"]
+  )
+}
+
+item_df_pythia_relfreq_novel <-
+  extract_item_preds_ci(
+    pythia_relfreq_item_preds_novel,
+    pythia_relfreq_novel$Alpha,
+    prefix = "pythia_relfreq"
+  )
+
+item_df_pythia_relfreq_attested <-
+  extract_item_preds_ci(
+    pythia_relfreq_item_preds_attested,
+    pythia_relfreq_attested$Alpha,
+    prefix = "pythia_relfreq"
+  )
+
+# --------------------------------------------------
+# Join to human data
+# --------------------------------------------------
+human_data_novel_pythia_relfreq <-
+  all_human_data_novel %>%
+  semi_join(item_df_pythia_relfreq_novel, by = "Alpha") %>%
+  left_join(item_df_pythia_relfreq_novel, by = "Alpha")
+
+human_data_attested_pythia_relfreq <-
+  all_human_data_attested %>%
+  semi_join(item_df_pythia_relfreq_attested, by = "Alpha") %>%
+  left_join(item_df_pythia_relfreq_attested, by = "Alpha")
+
+# Safety checks
+stopifnot(!any(is.na(human_data_novel_pythia_relfreq$item_logodds_pythia_relfreq)))
+stopifnot(!any(is.na(human_data_attested_pythia_relfreq$item_logodds_pythia_relfreq)))
+
+# --------------------------------------------------
+# Priors for human-choice model
+# --------------------------------------------------
+prior_probs_pythia_relfreq <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "item_logodds_pythia_relfreq"),
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+
+# --------------------------------------------------
+# Human choice models (GENPREF: novel + attested)
+# --------------------------------------------------
+human_data_novel_pythia_relfreq_model <- brm(
+  resp_binary ~ item_logodds_pythia_relfreq + (1 | participant) + (1 | Alpha),
+  data      = human_data_novel_pythia_relfreq,
+  family    = bernoulli(link = "logit"),
+  prior     = prior_probs_pythia_relfreq,
+  chains    = 4,
+  cores     = 4,
+  iter      = 6000,
+  warmup    = 3000,
+  save_pars = save_pars(all = TRUE),
+  file      = "../Data/human_data_novel_pythia_relfreq_model"
+) %>% add_criterion("loo")
+
+human_data_attested_pythia_relfreq_model <- brm(
+  resp_binary ~ item_logodds_pythia_relfreq + (1 | participant) + (1 | Alpha),
+  data      = human_data_attested_pythia_relfreq,
+  family    = bernoulli(link = "logit"),
+  prior     = prior_probs_pythia_relfreq,
+  chains    = 4,
+  cores     = 4,
+  iter      = 6000,
+  warmup    = 3000,
+  save_pars = save_pars(all = TRUE),
+  file      = "../Data/human_data_attested_pythia_relfreq_model"
 ) %>% add_criterion("loo")
 
 ```
 
+## Non-binomial Analysis
 
+### Statistical Predictors
+```{r eval = F}
+### Statistical Predictors
+options(contrasts = c("contr.sum","contr.sum"))
+
+corpus = read_csv('../Data/nonce_and_attested_binoms.csv')
+
+# --------------------------------------------------
+# CONTROL-coded Pythia data
+# --------------------------------------------------
+pythia_control_model_data = read_csv('../Data/PYTHIA_CONTROL_MODEL_BINOMIAL_PREFERENCES.csv') %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = FALSE, sep = ' ') %>%
+  select(-and) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(
+    y_vals =
+      0.02191943 + 0.23925834*Form + 0.24889543*Percept +
+      0.41836997*Culture + 0.25967334*Power +
+      0.01867604*Intense + 1.30365980*Icon +
+      0.08553552*Freq + 0.15241566*Len -
+      0.19381657*Lapse + 0.36019221*`*BStress`,
+    GenPref = plogis(y_vals) - 0.5,
+    RelFreq = RelFreq - 0.5
+  ) %>%
+  ungroup()
+
+pythia_control_model_data_attested = pythia_control_model_data %>%
+  filter(Attested == 1) %>%
+  mutate(CenteredOverallFreq = as.numeric(scale(log(OverallFreq))))
+
+pythia_control_model_data_novel = pythia_control_model_data %>%
+  filter(Attested == 0)
+
+pythia_control_model_data_attested$prompt = factor(pythia_control_model_data_attested$prompt)
+pythia_control_model_data_novel$prompt    = factor(pythia_control_model_data_novel$prompt)
+
+pythia_control_model_data_novel =
+  pythia_control_model_data_novel %>%
+  rename(no_final_stress = "*BStress")
+
+pythia_control_model_data_attested =
+  pythia_control_model_data_attested %>%
+  rename(no_final_stress = "*BStress")
+
+# --------------------------------------------------
+# Models
+# --------------------------------------------------
+pythia_control_attested = brm(
+  log_odds ~ GenPref + Control + CenteredOverallFreq +
+    GenPref:CenteredOverallFreq + Control:CenteredOverallFreq +
+    (GenPref | prompt) + (1 | Alpha),
+  data   = pythia_control_model_data_attested,
+  iter   = 10000,
+  warmup = 5000,
+  chains = 4,
+  cores  = 4,
+  control = list(max_treedepth = 20),
+  file   = '../Data/pythia_control_attested'
+)
+
+pythia_control_novel = brm(
+  log_odds ~ GenPref + (GenPref | prompt) + (1 | Alpha),
+  data   = pythia_control_model_data_novel,
+  iter   = 10000,
+  warmup = 5000,
+  chains = 4,
+  cores  = 4,
+  file   = '../Data/pythia_control_novel'
+)
+
+fixef(pythia_control_attested)
+fixef(pythia_control_novel)
+
+
+```
+
+### Human Analysis
+
+#### GPT OSS 120B Coded Data
+```{r}
+### Human Analysis
+#### GPT OSS 120B Coded Data
+
+# ==================================================
+# PYTHIA CONTROL → item preds → humans → LOO
+# ==================================================
+
+library(tidyverse)
+library(brms)
+
+# --------------------------------------------------
+# Load + prepare Pythia CONTROL data
+# --------------------------------------------------
+pythia_control_model_data <- read_csv(
+  "../Data/PYTHIA_CONTROL_MODEL_BINOMIAL_PREFERENCES.csv"
+) %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c("Word1", "and", "Word2"), remove = FALSE, sep = " ") %>%
+  select(-and) %>%
+  left_join(corpus, by = c("Word1", "Word2")) %>%
+  mutate(
+    checkpoint = "main",
+    y_vals =
+      0.02191943 +
+      0.23925834 * Form +
+      0.24889543 * Percept +
+      0.41836997 * Culture +
+      0.25967334 * Power +
+      0.01867604 * Intense +
+      1.30365980 * Icon +
+      0.08553552 * Freq +
+      0.15241566 * Len -
+      0.19381657 * Lapse +
+      0.36019221 * `*BStress`,
+    GenPref = plogis(y_vals) - 0.5,
+    Control = Control - 0.5
+  ) %>%
+  ungroup()
+
+# --------------------------------------------------
+# Split into novel vs attested
+# --------------------------------------------------
+pythia_control_novel =
+  pythia_control_model_data %>%
+  filter(Attested == 0)
+
+pythia_control_attested =
+  pythia_control_model_data %>%
+  filter(Attested == 1)
+
+# --------------------------------------------------
+# Priors
+# --------------------------------------------------
+prior_probs <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha"),
+  prior(student_t(3, 0, 1), class = "sd", group = "prompt"),
+  prior(student_t(3, 0, 1), class = "sigma")
+)
+
+# --------------------------------------------------
+# Item-level models
+# --------------------------------------------------
+pythia_control_item_preds_novel <- brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = pythia_control_novel,
+  prior  = prior_probs,
+  iter   = 18000,
+  warmup = 9000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/pythia_control_item_preds_novel_main"
+)
+
+pythia_control_item_preds_attested <- brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = pythia_control_attested,
+  prior  = prior_probs,
+  iter   = 20000,
+  warmup = 10000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/pythia_control_item_preds_attested_main"
+)
+
+# --------------------------------------------------
+# Extract per-item predicted log-odds + CIs
+# --------------------------------------------------
+extract_item_preds_ci <- function(fit, alphas, prefix) {
+  alphas_chr <- unique(as.character(alphas))
+
+  newdata <- data.frame(
+    Alpha  = alphas_chr,
+    prompt = NA_character_,
+    stringsAsFactors = FALSE
+  )
+
+  fit_mat <- fitted(
+    fit,
+    newdata    = newdata,
+    re_formula = ~(1 | Alpha),
+    summary    = TRUE,
+    allow_new_levels = TRUE
+  )
+
+  tibble(
+    Alpha = newdata$Alpha,
+    !!paste0("item_logodds_", prefix) := fit_mat[, "Estimate"],
+    !!paste0("item_lo_", prefix)      := fit_mat[, "Q2.5"],
+    !!paste0("item_hi_", prefix)      := fit_mat[, "Q97.5"]
+  )
+}
+
+item_df_pythia_control_novel <-
+  extract_item_preds_ci(
+    pythia_control_item_preds_novel,
+    pythia_control_novel$Alpha,
+    prefix = "pythia_control"
+  )
+
+item_df_pythia_control_attested <-
+  extract_item_preds_ci(
+    pythia_control_item_preds_attested,
+    pythia_control_attested$Alpha,
+    prefix = "pythia_control"
+  )
+
+# --------------------------------------------------
+# Join to human data
+# --------------------------------------------------
+human_data_novel_pythia_control <-
+  all_human_data_novel %>%
+  semi_join(item_df_pythia_control_novel, by = "Alpha") %>%
+  left_join(item_df_pythia_control_novel, by = "Alpha")
+
+human_data_attested_pythia_control <-
+  all_human_data_attested %>%
+  semi_join(item_df_pythia_control_attested, by = "Alpha") %>%
+  left_join(item_df_pythia_control_attested, by = "Alpha")
+
+stopifnot(!any(is.na(human_data_novel_pythia_control$item_logodds_pythia_control)))
+stopifnot(!any(is.na(human_data_attested_pythia_control$item_logodds_pythia_control)))
+
+# --------------------------------------------------
+# Priors for human-choice model
+# --------------------------------------------------
+prior_probs_pythia_control <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "item_logodds_pythia_control"),
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+
+# --------------------------------------------------
+# Human choice models
+# --------------------------------------------------
+human_data_novel_pythia_control_model <- brm(
+  resp_binary ~ item_logodds_pythia_control + (1 | participant) + (1 | Alpha),
+  data      = human_data_novel_pythia_control,
+  family    = bernoulli(),
+  prior     = prior_probs_pythia_control,
+  chains    = 4,
+  cores     = 4,
+  iter      = 6000,
+  warmup    = 3000,
+  save_pars = save_pars(all = TRUE),
+  file      = "../Data/human_data_novel_pythia_control_model"
+) %>% add_criterion("loo")
+
+human_data_attested_pythia_control_model <- brm(
+  resp_binary ~ item_logodds_pythia_control + (1 | participant) + (1 | Alpha),
+  data      = human_data_attested_pythia_control,
+  family    = bernoulli(),
+  prior     = prior_probs_pythia_control,
+  chains    = 4,
+  cores     = 4,
+  iter      = 6000,
+  warmup    = 3000,
+  save_pars = save_pars(all = TRUE),
+  file      = "../Data/human_data_attested_pythia_control_model"
+) %>% add_criterion("loo")
+
+
+```
+
+```{r}
+loo_compare(
+  human_data_attested_pythia_genpref_model$loo,
+  human_data_attested_pythia_relfreq_model$loo,
+  #human_data_attested_pythia_control_model$loo,
+  human_data_attested_pythia_model$loo
+)
+
+loo_compare(
+  human_data_novel_pythia_genpref_model$loo,
+  human_data_novel_pythia_relfreq_model$loo,
+  #human_data_novel_pythia_control_model$loo,
+  human_data_novel_pythia_model$loo
+)
+```
+## GenPref handcoded
+
+
+### 2 Epoch
+
+```{r}
+# ==================================================
+# PYTHIA HANDCODED — 1 EPOCH
+# ==================================================
+
+handcoded_1ep <- load_handcoded_pythia(
+  "../Data/PYTHIA_HANDCODED_MODEL_BINOMIAL_PREFERENCES.csv",
+  corpus = corpus
+)
+
+handcoded_1ep_novel    <- handcoded_1ep %>% filter(Attested == 0)
+handcoded_1ep_attested <- handcoded_1ep %>% filter(Alpha %in% test_df$Alpha)
+
+# --------------------------
+# Item models
+# --------------------------
+fit_hand_1ep_novel <- fit_item_model(
+  handcoded_1ep_novel,
+  file_stub = "../Data/handcoded_item_preds_pythia_1ep_novel",
+  iter = 18000,
+  warmup = 9000
+)
+
+fit_hand_1ep_attested <- fit_item_model(
+  handcoded_1ep_attested,
+  file_stub = "../Data/handcoded_item_preds_pythia_1ep_attested",
+  iter = 26000,
+  warmup = 13000
+)
+
+item_df_hand_1ep_novel <-
+  extract_item_preds(fit_hand_1ep_novel,
+                     handcoded_1ep_novel$Alpha)
+
+item_df_hand_1ep_attested <-
+  extract_item_preds(fit_hand_1ep_attested,
+                     handcoded_1ep_attested$Alpha)
+
+# --------------------------
+# Human data joins
+# --------------------------
+human_data_attested_hand_1ep <-
+  all_human_data_attested %>%
+  semi_join(test_df, by = "Alpha") %>%
+  left_join(item_df_hand_1ep_attested, by = "Alpha")
+
+human_data_novel_hand_1ep <-
+  all_human_data_novel %>%
+  left_join(item_df_hand_1ep_novel, by = "Alpha")
+
+# --------------------------
+# Human models
+# --------------------------
+human_data_attested_hand_1ep_model <- brm(
+  resp_binary ~ item_logodds_hand + (1 | participant) + (1 | Alpha),
+  data   = human_data_attested_hand_1ep,
+  family = bernoulli(),
+  prior  = prior_probs_hand,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/human_data_attested_hand_pythia_1ep"
+) %>% add_criterion("loo")
+
+human_data_novel_hand_1ep_model <- brm(
+  resp_binary ~ item_logodds_hand + (1 | participant) + (1 | Alpha),
+  data   = human_data_novel_hand_1ep,
+  family = bernoulli(),
+  prior  = prior_probs_hand,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/human_data_novel_hand_pythia_1ep"
+) %>% add_criterion("loo")
+
+fixef(human_data_attested_hand_1ep_model)
+
+fixef(human_data_novel_hand_1ep_model)
+```
+
+### 10 epoch
+
+```{r}
+# ==================================================
+# PYTHIA HANDCODED — 10 EPOCHS
+# ==================================================
+
+handcoded_10ep <- load_handcoded_pythia(
+  "../Data/PYTHIA_HANDCODED_10EP_MODEL_BINOMIAL_PREFERENCES.csv",
+  corpus = corpus
+)
+
+handcoded_10ep_novel    <- handcoded_10ep %>% filter(Attested == 0)
+handcoded_10ep_attested <- handcoded_10ep %>% filter(Alpha %in% test_df$Alpha)
+
+fit_hand_10ep_novel <- fit_item_model(
+  handcoded_10ep_novel,
+  file_stub = "../Data/handcoded_item_preds_pythia_10ep_novel",
+  iter = 18000,
+  warmup = 9000
+)
+
+fit_hand_10ep_attested <- fit_item_model(
+  handcoded_10ep_attested,
+  file_stub = "../Data/handcoded_item_preds_pythia_10ep_attested",
+  iter = 26000,
+  warmup = 13000
+)
+
+item_df_hand_10ep_novel <-
+  extract_item_preds(fit_hand_10ep_novel,
+                     handcoded_10ep_novel$Alpha)
+
+item_df_hand_10ep_attested <-
+  extract_item_preds(fit_hand_10ep_attested,
+                     handcoded_10ep_attested$Alpha)
+
+human_data_attested_hand_10ep <-
+  all_human_data_attested %>%
+  semi_join(test_df, by = "Alpha") %>%
+  left_join(item_df_hand_10ep_attested, by = "Alpha")
+
+human_data_novel_hand_10ep <-
+  all_human_data_novel %>%
+  left_join(item_df_hand_10ep_novel, by = "Alpha")
+
+human_data_attested_hand_10ep_model <- brm(
+  resp_binary ~ item_logodds_hand + (1 | participant) + (1 | Alpha),
+  data   = human_data_attested_hand_10ep,
+  family = bernoulli(),
+  prior  = prior_probs_hand,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/human_data_attested_hand_pythia_10ep"
+) %>% add_criterion("loo")
+
+human_data_novel_hand_10ep_model <- brm(
+  resp_binary ~ item_logodds_hand + (1 | participant) + (1 | Alpha),
+  data   = human_data_novel_hand_10ep,
+  family = bernoulli(),
+  prior  = prior_probs_hand,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/human_data_novel_hand_pythia_10ep"
+) %>% add_criterion("loo")
+
+
+loo_compare(
+  human_data_attested_hand_1ep_model,
+  human_data_attested_hand_10ep_model,
+  human_data_attested_hand_base_model
+)
+
+loo_compare(
+  human_data_novel_hand_1ep_model,
+  human_data_novel_hand_10ep_model,
+  human_data_novel_pythia_model
+)
+```
+
+
+# A different approach
+
+
+```{r}
+human_data_novel_joint <-
+  all_human_data_novel %>%
+  semi_join(item_df_pythia_novel, by = "Alpha") %>%
+  semi_join(item_df_pythia_genpref_novel, by = "Alpha") %>%
+  left_join(item_df_pythia_novel, by = "Alpha") %>%
+  left_join(item_df_pythia_genpref_novel, by = "Alpha")
+
+
+human_data_attested_joint <-
+  all_human_data_attested %>%
+  semi_join(item_df_pythia_attested, by = "Alpha") %>%
+  semi_join(item_df_pythia_genpref_attested, by = "Alpha") %>%
+  left_join(item_df_pythia_attested, by = "Alpha") %>%
+  left_join(item_df_pythia_genpref_attested, by = "Alpha")
+
+
+human_data_novel_joint <-
+  human_data_novel_joint %>%
+  mutate(
+    z_pythia         = as.numeric(scale(item_logodds_pythia)),
+    z_pythia_genpref = as.numeric(scale(item_logodds_pythia_genpref))
+  )
+
+human_data_attested_joint <-
+  human_data_attested_joint %>%
+  mutate(
+    z_pythia         = as.numeric(scale(item_logodds_pythia)),
+    z_pythia_genpref = as.numeric(scale(item_logodds_pythia_genpref))
+  )
+
+
+prior_joint <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "z_pythia"),
+  prior(normal(0, 1), class = "b", coef = "z_pythia_genpref"),
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+
+human_data_novel_joint_model <- brm(
+  resp_binary ~ z_pythia + z_pythia_genpref +
+    (1 | participant) +
+    (1 | Alpha),
+  data      = human_data_novel_joint,
+  family    = bernoulli(link = "logit"),
+  prior     = prior_joint,
+  chains    = 4,
+  cores     = 4,
+  iter      = 6000,
+  warmup    = 3000,
+  save_pars = save_pars(all = TRUE),
+  file      = "../Data/human_data_novel_joint_model_2ep"
+)
+
+
+human_data_attested_joint_model <- brm(
+  resp_binary ~ z_pythia + z_pythia_genpref +
+    (1 | participant) +
+    (1 | Alpha),
+  data      = human_data_attested_joint,
+  family    = bernoulli(link = "logit"),
+  prior     = prior_joint,
+  chains    = 4,
+  cores     = 4,
+  iter      = 6000,
+  warmup    = 3000,
+  save_pars = save_pars(all = TRUE),
+  file      = "../Data/human_data_attested_joint_model_2ep"
+)
+
+fixef(human_data_novel_joint_model)
+fixef(human_data_attested_joint_model)
+
+
+loo_compare(
+  loo(human_data_novel_joint_model),
+  loo(update(human_data_novel_joint_model, formula. = ~ . - z_pythia_genpref, chains = 4, cores = 4)),
+  loo(update(human_data_novel_joint_model, formula. = ~ . - z_pythia, chains = 4, cores = 4))
+)
+
+loo_compare(
+  loo(human_data_attested_joint_model),
+  loo(update(human_data_attested_joint_model, formula. = ~ . - z_pythia_genpref, chains = 4, cores = 4)),
+  loo(update(human_data_attested_joint_model, formula. = ~ . - z_pythia, chains = 4, cores = 4))
+)
+
+```
+
+## A different approach with handcoded data
+
+```{r}
+
+rename_item_pred <- function(item_df, new_name) {
+  item_df %>%
+    rename(!!new_name := item_logodds_hand)
+}
+
+make_joint_human_df <- function(human_df, base_item_df, genpref_item_df) {
+
+  # Keep only overlapping items
+  d <- human_df %>%
+    semi_join(base_item_df, by = "Alpha") %>%
+    semi_join(genpref_item_df, by = "Alpha") %>%
+    left_join(base_item_df, by = "Alpha") %>%
+    left_join(genpref_item_df, by = "Alpha")
+
+  # Safety: no missing predictors after join
+  stopifnot(!any(is.na(d$logodds_base)))
+  stopifnot(!any(is.na(d$logodds_genpref)))
+
+  # Standardize within this dataset (so slopes comparable)
+  d %>%
+    mutate(
+      z_base    = as.numeric(scale(logodds_base)),
+      z_genpref = as.numeric(scale(logodds_genpref))
+    )
+}
+
+```
+
+
+
+```{r}
+prior_joint <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "z_base"),
+  prior(normal(0, 1), class = "b", coef = "z_genpref"),
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+
+fit_joint_human <- function(df, file_stub) {
+  brm(
+    resp_binary ~ z_base + z_genpref +
+      (1 | participant) +
+      (1 | Alpha),
+    data      = df,
+    family    = bernoulli(),
+    prior     = prior_joint,
+    iter      = 6000,
+    warmup    = 3000,
+    chains    = 4,
+    cores     = 4,
+    save_pars = save_pars(all = TRUE),
+    file      = file_stub
+  )
+}
+
+summarize_delta <- function(fit) {
+  draws <- as_draws_df(fit)
+  delta <- draws$b_z_genpref - draws$b_z_base
+
+  list(
+    p_genpref_gt_base = mean(delta > 0),
+    delta_ci          = quantile(delta, c(.025, .5, .975))
+  )
+}
+
+
+base_att <- rename_item_pred(item_df_hand_base_attested, "logodds_base")
+#base_nov <- rename_item_pred(item_df_pythia_novel,    "logodds_base")
+base_nov <- item_df_pythia_novel %>%
+  transmute(
+    Alpha = as.character(Alpha),
+    logodds_base = item_logodds_pythia
+  )
+
+
+
+
+gp2_att  <- rename_item_pred(item_df_hand_1ep_attested,  "logodds_genpref")
+gp2_nov  <- rename_item_pred(item_df_hand_1ep_novel,     "logodds_genpref")
+
+gp10_att <- rename_item_pred(item_df_hand_10ep_attested, "logodds_genpref")
+gp10_nov <- rename_item_pred(item_df_hand_10ep_novel,    "logodds_genpref")
+
+
+hum_att <- all_human_data_attested %>% semi_join(test_df, by = "Alpha")
+hum_nov <- all_human_data_novel
+
+
+# 2ep
+human_attested_joint_2ep <- make_joint_human_df(hum_att, base_att, gp2_att)
+human_novel_joint_2ep    <- make_joint_human_df(hum_nov, base_nov, gp2_nov)
+
+# 10ep
+human_attested_joint_10ep <- make_joint_human_df(hum_att, base_att, gp10_att)
+human_novel_joint_10ep    <- make_joint_human_df(hum_nov, base_nov, gp10_nov)
+
+
+m_att_2ep <- fit_joint_human(human_attested_joint_2ep,
+                            "../Data/human_joint_attested_base_vs_genpref_2ep")
+
+m_nov_2ep <- fit_joint_human(human_novel_joint_2ep,
+                            "../Data/human_joint_novel_base_vs_genpref_2ep")
+
+m_att_10ep <- fit_joint_human(human_attested_joint_10ep,
+                             "../Data/human_joint_attested_base_vs_genpref_10ep")
+
+m_nov_10ep <- fit_joint_human(human_novel_joint_10ep,
+                             "../Data/human_joint_novel_base_vs_genpref_10ep")
+
+
+fixef(m_att_2ep);  summarize_delta(m_att_2ep)
+fixef(m_nov_2ep);  summarize_delta(m_nov_2ep)
+
+fixef(m_att_10ep); summarize_delta(m_att_10ep)
+fixef(m_nov_10ep); summarize_delta(m_nov_10ep)
+
+
+loo_ablation <- function(fit) {
+  loo_compare(
+    loo(fit),
+    loo(update(fit, formula. = ~ . - z_genpref, chains = 4, cores = 4)),
+    loo(update(fit, formula. = ~ . - z_base, chains = 4, cores = 4))
+  )
+}
+
+
+loo_ablation(m_att_2ep)
+loo_ablation(m_nov_2ep)
+
+loo_ablation(m_att_10ep)
+loo_ablation(m_nov_10ep)
+
+```
+# 460M
+
+### Human Analysis
+
+
+
+#### GPT OSS 120B Coded Data
+
+```{r}
+# ==================================================
+# PYTHIA baseline → item preds → humans → LOO
+# (GenPref-OLD structure, Pythia data)
+# ==================================================
+
+library(tidyverse)
+library(brms)
+
+options(contrasts = c("contr.sum","contr.sum"))
+
+corpus = read_csv('../Data/nonce_and_attested_binoms.csv')
+
+pythia410M_baseline_model_data = read_csv('../Data/PYTHIA_410M_BASE_MODEL_BINOMIAL_PREFERENCES.csv') %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = RelFreq - 0.5) %>%
+  ungroup()
+
+
+# --------------------------------------------------
+# Split Pythia data into novel vs attested
+# --------------------------------------------------
+pythia410M_model_data_novel <-
+  pythia410M_baseline_model_data %>%
+  filter(Attested == 0)
+
+pythia410M_model_data_attested <-
+  pythia410M_baseline_model_data %>%
+  filter(Attested == 1)
+
+
+prior_probs <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha"),
+  prior(student_t(3, 0, 1), class = "sd", group = "prompt"),
+  prior(student_t(3, 0, 1), class = "sigma")
+)
+
+
+
+# --------------------------------------------------
+# Item-level models (log_odds ~ 1 + REs)
+# --------------------------------------------------
+pythia410M_item_preds_novel <- brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = pythia410M_model_data_novel,
+  prior  = prior_probs,
+  iter   = 18000,
+  warmup = 9000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/pythia410M_item_preds_novel"
+)
+
+pythia410M_item_preds_attested <- brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = pythia410M_model_data_attested,
+  prior  = prior_probs,
+  iter   = 20000,
+  warmup = 10000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/pythia410M_item_preds_attested"
+)
+
+
+# --------------------------------------------------
+# Extract per-item predicted log-odds + CIs
+# --------------------------------------------------
+extract_item_preds_ci <- function(fit, alphas, prefix) {
+  # Ensure we never trip factor-level mismatches
+  alphas_chr <- unique(as.character(alphas))
+
+  newdata <- data.frame(
+    Alpha  = alphas_chr,
+    prompt = NA_character_,
+    stringsAsFactors = FALSE
+  )
+
+  fit_mat <- fitted(
+    fit,
+    newdata    = newdata,
+    re_formula = ~(1 | Alpha),   # only item RE
+    summary    = TRUE,
+    allow_new_levels = TRUE      # critical if any level mismatch remains
+  )
+
+  tibble(
+    Alpha = newdata$Alpha,
+    !!paste0("item_logodds_", prefix) := fit_mat[, "Estimate"],
+    !!paste0("item_lo_", prefix)      := fit_mat[, "Q2.5"],
+    !!paste0("item_hi_", prefix)      := fit_mat[, "Q97.5"]
+  )
+}
+
+
+item_df_pythia410M_novel <-
+  extract_item_preds_ci(
+    pythia410M_item_preds_novel,
+    pythia410M_model_data_novel$Alpha,
+    prefix = "pythia410M"
+  )
+
+item_df_pythia410M_attested <-
+  extract_item_preds_ci(
+    pythia410M_item_preds_attested,
+    pythia410M_model_data_attested$Alpha,
+    prefix = "pythia410M"
+  )
+
+# --------------------------------------------------
+# Join to human data
+# --------------------------------------------------
+human_data_novel_pythia410M <-
+  all_human_data_novel %>%
+  semi_join(item_df_pythia410M_novel, by = "Alpha") %>%
+  left_join(item_df_pythia410M_novel, by = "Alpha")
+
+human_data_attested_pythia410M <-
+  all_human_data_attested %>%
+  semi_join(item_df_pythia410M_attested, by = "Alpha") %>%
+  left_join(item_df_pythia410M_attested, by = "Alpha")
+
+stopifnot(!any(is.na(human_data_novel_pythia410M$item_logodds_pythia410M)))
+stopifnot(!any(is.na(human_data_attested_pythia410M$item_logodds_pythia410M)))
+
+
+
+prior_probs_pythia410M <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "item_logodds_pythia410M"),
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+
+human_data_novel_pythia410M_model <- brm(
+  resp_binary ~ item_logodds_pythia410M + (1 | participant) + (1 | Alpha),
+  data      = human_data_novel_pythia410M,
+  family    = bernoulli(),
+  prior     = prior_probs_pythia410M,
+  iter      = 6000,
+  warmup    = 3000,
+  chains    = 4,
+  cores     = 4,
+  file      = "../Data/human_data_novel_pythia410M"
+) %>% add_criterion("loo")
+
+human_data_attested_pythia410M_model <- brm(
+  resp_binary ~ item_logodds_pythia410M + (1 | participant) + (1 | Alpha),
+  data      = human_data_attested_pythia410M,
+  family    = bernoulli(),
+  prior     = prior_probs_pythia410M,
+  iter      = 6000,
+  warmup    = 3000,
+  chains    = 4,
+  cores     = 4,
+  file      = "../Data/human_data_attested_pythia410M"
+) %>% add_criterion("loo")
+
+fixef(human_data_novel_pythia410M_model)
+fixef(human_data_attested_pythia410M_model)
+
+```
+
+#### Attested for handcoded comparison
+
+```{r}
+# --------------------------------------------------
+# Handcoded BASELINE — ATTESTED — Pythia 410M
+# --------------------------------------------------
+
+# 1) Raw data used to fit item model
+pythia_410M_handcoded_baseline_attested_raw <-
+  pythia410M_baseline_model_data %>%
+  filter(Alpha %in% test_df$Alpha)
+
+# 2) Item-level model fit
+pythia_410M_handcoded_baseline_attested_item_fit <- fit_item_model(
+  pythia_410M_handcoded_baseline_attested_raw,
+  file_stub = "../Data/itemfit_pythia_410M_handcoded_baseline_attested",
+  iter = 26000,
+  warmup = 13000
+)
+
+# 3) Extract item-level predictions
+item_preds_pythia_410M_handcoded_baseline_attested <-
+  extract_item_preds(
+    pythia_410M_handcoded_baseline_attested_item_fit,
+    pythia_410M_handcoded_baseline_attested_raw$Alpha
+  )
+
+# 4) Canonical baseline predictor (for joint models)
+pred_baseline_pythia_410M_attested <-
+  item_preds_pythia_410M_handcoded_baseline_attested %>%
+  transmute(
+    Alpha = as.character(Alpha),
+    logodds_baseline = item_logodds_hand
+  )
+
+# --------------------------------------------------
+# Human model — baseline only (attested)
+# --------------------------------------------------
+
+human_attested_with_baseline_pythia_410M <-
+  all_human_data_attested %>%
+  semi_join(test_df, by = "Alpha") %>%
+  left_join(
+    item_preds_pythia_410M_handcoded_baseline_attested,
+    by = "Alpha"
+  )
+
+human_attested_baseline_hand_pythia_410M <- brm(
+  resp_binary ~ item_logodds_hand + (1 | participant) + (1 | Alpha),
+  data   = human_attested_with_baseline_pythia_410M,
+  family = bernoulli(),
+  prior  = prior_probs_hand,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/human_attested_baseline_hand_pythia_410M"
+) %>% add_criterion("loo")
+
+
+```
+
+
+# 1B
+
+### Human Analysis
+
+#### GPT OSS 120B Coded Data
+
+```{r}
+# ==================================================
+# PYTHIA baseline → item preds → humans → LOO
+# (GenPref-OLD structure, Pythia data)
+# ==================================================
+
+library(tidyverse)
+library(brms)
+
+options(contrasts = c("contr.sum","contr.sum"))
+
+corpus = read_csv('../Data/nonce_and_attested_binoms.csv')
+
+pythia1B_baseline_model_data = read_csv('../Data/PYTHIA_1B_BASE_MODEL_BINOMIAL_PREFERENCES.csv') %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = F, sep = ' ') %>%
+  select(-and) %>%
+  #mutate(across(2:3, tolower)) %>%
+  left_join(corpus) %>%
+  mutate(checkpoint = 'main') %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5) %>%
+  mutate(RelFreq = RelFreq - 0.5) %>%
+  ungroup()
+
+
+# --------------------------------------------------
+# Split Pythia data into novel vs attested
+# --------------------------------------------------
+pythia1B_model_data_novel <-
+  pythia1B_baseline_model_data %>%
+  filter(Attested == 0)
+
+pythia1B_model_data_attested <-
+  pythia1B_baseline_model_data %>%
+  filter(Attested == 1)
+
+
+prior_probs <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha"),
+  prior(student_t(3, 0, 1), class = "sd", group = "prompt"),
+  prior(student_t(3, 0, 1), class = "sigma")
+)
+
+
+
+# --------------------------------------------------
+# Item-level models (log_odds ~ 1 + REs)
+# --------------------------------------------------
+pythia1B_item_preds_novel <- brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = pythia1B_model_data_novel,
+  prior  = prior_probs,
+  iter   = 18000,
+  warmup = 9000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/pythia1B_item_preds_novel"
+)
+
+pythia1B_item_preds_attested <- brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = pythia1B_model_data_attested,
+  prior  = prior_probs,
+  iter   = 20000,
+  warmup = 10000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/pythia1B_item_preds_attested"
+)
+
+
+# --------------------------------------------------
+# Extract per-item predicted log-odds + CIs
+# --------------------------------------------------
+extract_item_preds_ci <- function(fit, alphas, prefix) {
+  # Ensure we never trip factor-level mismatches
+  alphas_chr <- unique(as.character(alphas))
+
+  newdata <- data.frame(
+    Alpha  = alphas_chr,
+    prompt = NA_character_,
+    stringsAsFactors = FALSE
+  )
+
+  fit_mat <- fitted(
+    fit,
+    newdata    = newdata,
+    re_formula = ~(1 | Alpha),   # only item RE
+    summary    = TRUE,
+    allow_new_levels = TRUE      # critical if any level mismatch remains
+  )
+
+  tibble(
+    Alpha = newdata$Alpha,
+    !!paste0("item_logodds_", prefix) := fit_mat[, "Estimate"],
+    !!paste0("item_lo_", prefix)      := fit_mat[, "Q2.5"],
+    !!paste0("item_hi_", prefix)      := fit_mat[, "Q97.5"]
+  )
+}
+
+
+item_df_pythia1B_novel <-
+  extract_item_preds_ci(
+    pythia1B_item_preds_novel,
+    pythia1B_model_data_novel$Alpha,
+    prefix = "pythia1B"
+  )
+
+item_df_pythia1B_attested <-
+  extract_item_preds_ci(
+    pythia1B_item_preds_attested,
+    pythia1B_model_data_attested$Alpha,
+    prefix = "pythia1B"
+  )
+
+# --------------------------------------------------
+# Join to human data
+# --------------------------------------------------
+human_data_novel_pythia1B <-
+  all_human_data_novel %>%
+  semi_join(item_df_pythia1B_novel, by = "Alpha") %>%
+  left_join(item_df_pythia1B_novel, by = "Alpha")
+
+human_data_attested_pythia1B <-
+  all_human_data_attested %>%
+  semi_join(item_df_pythia1B_attested, by = "Alpha") %>%
+  left_join(item_df_pythia1B_attested, by = "Alpha")
+
+stopifnot(!any(is.na(human_data_novel_pythia1B$item_logodds_pythia1B)))
+stopifnot(!any(is.na(human_data_attested_pythia1B$item_logodds_pythia1B)))
+
+
+
+prior_probs_pythia1B <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "item_logodds_pythia1B"),
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+
+human_data_novel_pythia1B_model <- brm(
+  resp_binary ~ item_logodds_pythia1B + (1 | participant) + (1 | Alpha),
+  data      = human_data_novel_pythia1B,
+  family    = bernoulli(),
+  prior     = prior_probs_pythia410M,
+  iter      = 6000,
+  warmup    = 3000,
+  chains    = 4,
+  cores     = 4,
+  file      = "../Data/human_data_novel_pythia1B"
+) %>% add_criterion("loo")
+
+human_data_attested_pythia1B_model <- brm(
+  resp_binary ~ item_logodds_pythia1B + (1 | participant) + (1 | Alpha),
+  data      = human_data_attested_pythia1B,
+  family    = bernoulli(),
+  prior     = prior_probs_pythia410M,
+  iter      = 6000,
+  warmup    = 3000,
+  chains    = 4,
+  cores     = 4,
+  file      = "../Data/human_data_attested_pythia1B"
+) %>% add_criterion("loo")
+
+fixef(human_data_novel_pythia1B_model)
+fixef(human_data_attested_pythia1B_model)
+
+```
+
+#### Attested for handcoded comparison
+
+```{r}
+# --------------------------------------------------
+# Handcoded BASELINE — ATTESTED — Pythia 410M
+# --------------------------------------------------
+
+# 1) Raw data used to fit item model
+pythia_1B_handcoded_baseline_attested_raw <-
+  pythia1B_baseline_model_data %>%
+  filter(Alpha %in% test_df$Alpha)
+
+# 2) Item-level model fit
+pythia_1B_handcoded_baseline_attested_item_fit <- fit_item_model(
+  pythia_1B_handcoded_baseline_attested_raw,
+  file_stub = "../Data/itemfit_pythia_1B_handcoded_baseline_attested",
+  iter = 26000,
+  warmup = 13000
+)
+
+# 3) Extract item-level predictions
+item_preds_pythia_1B_handcoded_baseline_attested <-
+  extract_item_preds(
+    pythia_1B_handcoded_baseline_attested_item_fit,
+    pythia_1B_handcoded_baseline_attested_raw$Alpha
+  )
+
+# 4) Canonical baseline predictor (for joint models)
+pred_baseline_pythia_1B_attested <-
+  item_preds_pythia_1B_handcoded_baseline_attested %>%
+  transmute(
+    Alpha = as.character(Alpha),
+    logodds_baseline = item_logodds_hand
+  )
+
+# --------------------------------------------------
+# Human model — baseline only (attested)
+# --------------------------------------------------
+
+human_attested_with_baseline_pythia_1B <-
+  all_human_data_attested %>%
+  semi_join(test_df, by = "Alpha") %>%
+  left_join(
+    item_preds_pythia_1B_handcoded_baseline_attested,
+    by = "Alpha"
+  )
+
+human_attested_baseline_hand_pythia_1B <- brm(
+  resp_binary ~ item_logodds_hand + (1 | participant) + (1 | Alpha),
+  data   = human_attested_with_baseline_pythia_1B,
+  family = bernoulli(),
+  prior  = prior_probs_hand,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/human_attested_baseline_hand_pythia_1B"
+) %>% add_criterion("loo")
+
+
+```

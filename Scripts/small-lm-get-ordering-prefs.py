@@ -27,7 +27,7 @@ def to_tokens_and_logprobs(model, tokenizer, input_texts):
     input_ids = enc["input_ids"].to(device)
     attention_mask = enc["attention_mask"].to(device)
 
-    outputs = model(input_ids)
+    outputs = model(input_ids, attention_mask = attention_mask)
     logits = outputs.logits
     logprobs = torch.log_softmax(logits, dim=-1)
 
@@ -185,7 +185,9 @@ def main():
         #"qing-yao/handcoded-finetuned-ep5_n5000_seed-42_1e-4",
         #"qing-yao/handcoded-finetuned-ep10_n5000_seed-42_1e-4"
         #"EleutherAI/pythia-160m",
-        "qing-yao/genfreq-finetuned-ep2_seed-42_1e-4"
+        #"qing-yao/handcoded-finetuned-ep10_seed-42_1e-4",
+        #"EleutherAI/pythia-410m",
+        "EleutherAI/pythia-1b"
     ]
 
     all_results = []
@@ -206,7 +208,7 @@ def main():
     #  SAVE MASTER CSV
     # ================================================
     final_df = pd.concat(all_results, ignore_index=True)
-    out_path = '../Data/PYTHIA_GENPREF_MODEL_BINOMIAL_PREFERENCES.csv'
+    out_path = '../Data/PYTHIA_1B_BASE_MODEL_BINOMIAL_PREFERENCES.csv'
     #change to ALL_MODELS_ALL_PROMPTS.csv when just want nonce binoms
     final_df.to_csv(out_path, index=False)
 
