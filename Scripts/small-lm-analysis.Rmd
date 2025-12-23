@@ -9,6 +9,9 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(brms)
+
+test_df  <- read_csv('../Data/attested_binoms_test.csv')
+train_df <- read_csv('../Data/attested_binoms_train.csv')
 ```
 
 # Genpref and Individual Constraint Analyses
@@ -683,6 +686,573 @@ model_small_novel_control_finetuned_1epoch = brm(
 fixef(model_small_attested_control_finetuned_1epoch)
 fixef(model_small_novel_control_finetuned_1epoch)
 
+```
+
+## Hand coded
+
+```{r}
+
+options(contrasts = c("contr.sum","contr.sum"))
+
+corpus = read_csv('../Data/nonce_and_attested_binoms.csv')
+
+model_data_handcoded_1k =
+  read_csv('../Data/FINETUNED_HANDCODED_1EPOCH_MODEL_BINOMIAL_PREFERENCES.csv') %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c('Word1','and','Word2'), remove = FALSE, sep = ' ') %>%
+  select(-and) %>%
+  left_join(corpus) %>%
+  mutate(
+    checkpoint = "handcoded_n1000",
+    y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +
+             0.41836997*Culture + 0.25967334*Power + 0.01867604*Intense +
+             1.30365980*Icon + 0.08553552*Freq + 0.15241566*Len -
+             0.19381657*Lapse + 0.36019221*`*BStress`,
+    GenPref = plogis(y_vals) - 0.5,
+    RelFreq = RelFreq - 0.5
+  ) %>%
+  filter(model == "qing-yao/handcoded-finetuned-ep1_n1000_seed-42_1e-4") %>%
+  ungroup()
+
+small_attested_handcoded_1k =
+  model_data_handcoded_1k %>%
+  filter(Alpha %in% test_df$Alpha) %>%
+  mutate(CenteredOverallFreq = scale(log(OverallFreq)))
+
+small_novel_handcoded_1k =
+  model_data_handcoded_1k %>%
+  filter(Attested == 0)
+small_attested_handcoded_1k$prompt =
+  factor(small_attested_handcoded_1k$prompt)
+
+small_novel_handcoded_1k$prompt =
+  factor(small_novel_handcoded_1k$prompt)
+
+small_attested_handcoded_1k =
+  small_attested_handcoded_1k %>%
+  rename(no_final_stress = "*BStress")
+
+small_novel_handcoded_1k =
+  small_novel_handcoded_1k %>%
+  rename(no_final_stress = "*BStress")
+
+model_small_attested_handcoded_1k = brm(
+  log_odds ~
+    (GenPref + RelFreq + CenteredOverallFreq +
+     GenPref:CenteredOverallFreq + RelFreq:CenteredOverallFreq) +
+    (GenPref | prompt) + (1 | Alpha),
+  data   = small_attested_handcoded_1k,
+  iter   = 10000,
+  warmup = 5000,
+  chains = 4,
+  cores  = 4,
+  control = list(max_treedepth = 20),
+  file   = '../Data/model_small_attested_handcoded_1k'
+)
+
+model_small_novel_handcoded_1k = brm(
+  log_odds ~ GenPref + (GenPref | prompt) + (1 | Alpha),
+  data   = small_novel_handcoded_1k,
+  iter   = 10000,
+  warmup = 5000,
+  chains = 4,
+  cores  = 4,
+  file   = '../Data/model_small_novel_handcoded_1k'
+)
+
+fixef(model_small_attested_handcoded_1k)
+fixef(model_small_novel_handcoded_1k)
+
+```
+### Handcoded all five models
+
+```{r}
+
+run_handcoded_small_models <- function(model_name) {
+
+  message("Running model: ", model_name)
+
+  model_tag <- gsub(".*_n([0-9]+)_.*", "n\\1", model_name)
+
+  # --------------------------
+  # Load + prepare data
+  # --------------------------
+  model_data_handcoded =
+    read_csv('../Data/FINETUNED_HANDCODED_1EPOCH_MODEL_BINOMIAL_PREFERENCES.csv') %>%
+    mutate(log_odds = preference) %>%
+    separate(binom, c('Word1','and','Word2'), remove = FALSE, sep = ' ') %>%
+    select(-and) %>%
+    left_join(corpus) %>%
+    mutate(
+      checkpoint = model_tag,
+      y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +
+               0.41836997*Culture + 0.25967334*Power + 0.01867604*Intense +
+               1.30365980*Icon + 0.08553552*Freq + 0.15241566*Len -
+               0.19381657*Lapse + 0.36019221*`*BStress`,
+      GenPref = plogis(y_vals) - 0.5,
+      RelFreq = RelFreq - 0.5
+    ) %>%
+    filter(model == model_name) %>%
+    ungroup()
+
+  # --------------------------
+  # Split: attested (test) vs novel
+  # --------------------------
+  small_attested =
+    model_data_handcoded %>%
+    filter(Alpha %in% test_df$Alpha) %>%
+    mutate(CenteredOverallFreq = scale(log(OverallFreq)))
+
+  small_novel =
+    model_data_handcoded %>%
+    filter(Attested == 0)
+
+  # --------------------------
+  # Factor handling
+  # --------------------------
+  small_attested$prompt <- factor(small_attested$prompt)
+  small_novel$prompt    <- factor(small_novel$prompt)
+
+  small_attested <- small_attested %>%
+    rename(no_final_stress = "*BStress")
+
+  small_novel <- small_novel %>%
+    rename(no_final_stress = "*BStress")
+
+  # --------------------------
+  # Fit ATTENDED model
+  # --------------------------
+  model_attested <- brm(
+    log_odds ~
+      (GenPref + RelFreq + CenteredOverallFreq +
+       GenPref:CenteredOverallFreq + RelFreq:CenteredOverallFreq) +
+      (GenPref | prompt) + (1 | Alpha),
+    data   = small_attested,
+    iter   = 10000,
+    warmup = 5000,
+    chains = 4,
+    cores  = 4,
+    control = list(max_treedepth = 20),
+    file   = paste0(
+      "../Data/model_small_attested_handcoded_",
+      model_tag
+    )
+  )
+
+  # --------------------------
+  # Fit NOVEL model
+  # --------------------------
+  model_novel <- brm(
+    log_odds ~ GenPref + (GenPref | prompt) + (1 | Alpha),
+    data   = small_novel,
+    iter   = 10000,
+    warmup = 5000,
+    chains = 4,
+    cores  = 4,
+    file   = paste0(
+      "../Data/model_small_novel_handcoded_",
+      model_tag
+    )
+  )
+
+  # --------------------------
+  # Return models + metadata
+  # --------------------------
+  list(
+    model_name   = model_name,
+    model_tag    = model_tag,
+    attested     = model_attested,
+    novel        = model_novel
+  )
+}
+
+hand_models <- c(
+  "qing-yao/handcoded-finetuned-ep1_n1000_seed-42_1e-4",
+  "qing-yao/handcoded-finetuned-ep1_n2000_seed-42_1e-4",
+  "qing-yao/handcoded-finetuned-ep1_n3000_seed-42_1e-4",
+  "qing-yao/handcoded-finetuned-ep1_n4000_seed-42_1e-4",
+  "qing-yao/handcoded-finetuned-ep1_n5000_seed-42_1e-4"
+)
+
+handcoded_small_models <-
+  lapply(hand_models, run_handcoded_small_models)
+
+names(handcoded_small_models) <- hand_models
+
+lapply(
+  handcoded_small_models,
+  function(x) fixef(x$attested)
+)
+
+lapply(
+  handcoded_small_models,
+  function(x) fixef(x$novel)
+)
+
+tidy_fixef <- function(fit, model_tag, condition) {
+  fixef(fit) %>%
+    as.data.frame() %>%
+    rownames_to_column("term") %>%
+    as_tibble() %>%
+    mutate(
+      model_tag = model_tag,
+      condition = condition
+    )
+}
+
+fixef_attested_tbl <-
+  map_dfr(
+    handcoded_small_models,
+    ~ tidy_fixef(
+        fit       = .x$attested,
+        model_tag = .x$model_tag,
+        condition = "attested"
+      )
+  )
+
+fixef_novel_tbl <-
+  map_dfr(
+    handcoded_small_models,
+    ~ tidy_fixef(
+        fit       = .x$novel,
+        model_tag = .x$model_tag,
+        condition = "novel"
+      )
+  )
+
+fixef_all_tbl <-
+  bind_rows(fixef_attested_tbl, fixef_novel_tbl)
+
+fixef_all_tbl
+```
+### More epochs
+
+```{r}
+run_handcoded_small_models_multiepoch <- function(model_name) {
+
+  message("Running model: ", model_name)
+
+  # Extract epoch + n (e.g., ep5_n5000)
+  m <- stringr::str_match(
+    model_name,
+    "handcoded-finetuned-(ep[0-9]+)_n([0-9]+)"
+  )
+  
+  stopifnot(!any(is.na(m)))
+  
+  model_tag <- paste0(m[2], "_n", m[3])
+
+  # --------------------------
+  # Load + prepare data
+  # --------------------------
+  model_data_handcoded <-
+    read_csv(
+      "../Data/FINETUNED_HANDCODED_MULTIPLE_EPOCH_MODEL_BINOMIAL_PREFERENCES.csv"
+    ) %>%
+    mutate(log_odds = preference) %>%
+    separate(binom, c("Word1", "and", "Word2"),
+             remove = FALSE, sep = " ") %>%
+    select(-and) %>%
+    left_join(corpus) %>%
+    mutate(
+      checkpoint = model_tag,
+      y_vals =
+        0.02191943 +
+        0.23925834 * Form +
+        0.24889543 * Percept +
+        0.41836997 * Culture +
+        0.25967334 * Power +
+        0.01867604 * Intense +
+        1.30365980 * Icon +
+        0.08553552 * Freq +
+        0.15241566 * Len -
+        0.19381657 * Lapse +
+        0.36019221 * `*BStress`,
+      GenPref = plogis(y_vals) - 0.5,
+      RelFreq = RelFreq - 0.5
+    ) %>%
+    filter(model == model_name) %>%
+    ungroup()
+
+  # --------------------------
+  # Split: attested (test) vs novel
+  # --------------------------
+  small_attested <-
+    model_data_handcoded %>%
+    filter(Alpha %in% test_df$Alpha) %>%
+    mutate(CenteredOverallFreq = as.numeric(scale(log(OverallFreq))))
+
+  small_novel <-
+    model_data_handcoded %>%
+    filter(Attested == 0)
+
+  # --------------------------
+  # Factor handling
+  # --------------------------
+  small_attested$prompt <- factor(small_attested$prompt)
+  small_novel$prompt    <- factor(small_novel$prompt)
+
+  small_attested <-
+    small_attested %>%
+    rename(no_final_stress = "*BStress")
+
+  small_novel <-
+    small_novel %>%
+    rename(no_final_stress = "*BStress")
+
+  # --------------------------
+  # Fit ATTESTED model
+  # --------------------------
+  model_attested <- brm(
+    log_odds ~
+      (GenPref + RelFreq + CenteredOverallFreq +
+       GenPref:CenteredOverallFreq + RelFreq:CenteredOverallFreq) +
+      (GenPref + RelFreq + CenteredOverallFreq +
+       GenPref:CenteredOverallFreq + RelFreq:CenteredOverallFreq | prompt) + (1 | Alpha),
+    data   = small_attested,
+    iter   = 10000,
+    warmup = 5000,
+    chains = 4,
+    cores  = 4,
+    control = list(max_treedepth = 20),
+    file   = paste0(
+      "../Data/model_small_attested_handcoded_",
+      model_tag
+    )
+  )
+
+  # --------------------------
+  # Fit NOVEL model
+  # --------------------------
+  model_novel <- brm(
+    log_odds ~ GenPref + (GenPref | prompt) + (1 | Alpha),
+    data   = small_novel,
+    iter   = 10000,
+    warmup = 5000,
+    chains = 4,
+    cores  = 4,
+    file   = paste0(
+      "../Data/model_small_novel_handcoded_",
+      model_tag
+    )
+  )
+
+  # --------------------------
+  # Return models + metadata
+  # --------------------------
+  list(
+    model_name = model_name,
+    model_tag  = model_tag,
+    attested   = model_attested,
+    novel      = model_novel
+  )
+}
+hand_models_multiepoch <- c(
+  "qing-yao/handcoded-finetuned-ep2_n5000_seed-42_1e-4",
+  "qing-yao/handcoded-finetuned-ep5_n5000_seed-42_1e-4",
+  "qing-yao/handcoded-finetuned-ep10_n5000_seed-42_1e-4"
+)
+
+handcoded_small_models_multiepoch <-
+  lapply(hand_models_multiepoch,
+         run_handcoded_small_models_multiepoch)
+
+names(handcoded_small_models_multiepoch) <- hand_models_multiepoch
+
+lapply(
+  handcoded_small_models_multiepoch,
+  function(x) fixef(x$attested)
+)
+
+lapply(
+  handcoded_small_models_multiepoch,
+  function(x) fixef(x$novel)
+)
+
+fixef_attested_tbl_multiepoch <-
+  map_dfr(
+    handcoded_small_models_multiepoch,
+    ~ tidy_fixef(
+        fit       = .x$attested,
+        model_tag = .x$model_tag,
+        condition = "attested"
+      )
+  )
+
+fixef_novel_tbl_multiepoch <-
+  map_dfr(
+    handcoded_small_models_multiepoch,
+    ~ tidy_fixef(
+        fit       = .x$novel,
+        model_tag = .x$model_tag,
+        condition = "novel"
+      )
+  )
+
+fixef_all_tbl_multiepoch <-
+  bind_rows(
+    fixef_attested_tbl_multiepoch,
+    fixef_novel_tbl_multiepoch
+  )
+
+fixef_all_tbl_multiepoch
+
+```
+
+## Baseline vs GenPref
+
+```{r}
+
+make_model_id <- function(model_name) {
+  model_name %>%
+    gsub("/", "_", .) %>%
+    gsub("[^A-Za-z0-9_.-]", "_", .)
+}
+
+run_small_model_pipeline <- function(
+  model_name,
+  data_csv,
+  corpus,
+  test_df,
+  out_dir = "../Data"
+) {
+
+  message("Running model: ", model_name)
+
+  model_id <- make_model_id(model_name)
+
+  # --------------------------
+  # Load + prepare data
+  # --------------------------
+  model_data <-
+    read_csv(data_csv) %>%
+    mutate(log_odds = preference) %>%
+    separate(binom, c("Word1", "and", "Word2"),
+             remove = FALSE, sep = " ") %>%
+    select(-and) %>%
+    left_join(corpus, by = c("Word1", "Word2")) %>%
+    mutate(
+      y_vals =
+        0.02191943 +
+        0.23925834 * Form +
+        0.24889543 * Percept +
+        0.41836997 * Culture +
+        0.25967334 * Power +
+        0.01867604 * Intense +
+        1.30365980 * Icon +
+        0.08553552 * Freq +
+        0.15241566 * Len -
+        0.19381657 * Lapse +
+        0.36019221 * `*BStress`,
+      GenPref = plogis(y_vals) - 0.5,
+      RelFreq = RelFreq - 0.5
+    ) %>%
+    filter(model == model_name) %>%
+    ungroup()
+
+  # --------------------------
+  # Split: attested vs novel
+  # --------------------------
+  attested_df <-
+    model_data %>%
+    filter(Alpha %in% test_df$Alpha) %>%
+    mutate(CenteredOverallFreq = as.numeric(scale(log(OverallFreq))))
+
+  novel_df <-
+    model_data %>%
+    filter(Attested == 0)
+
+  # --------------------------
+  # Factor handling
+  # --------------------------
+  attested_df$prompt <- factor(attested_df$prompt)
+  novel_df$prompt    <- factor(novel_df$prompt)
+
+  attested_df <- attested_df %>% rename(no_final_stress = `*BStress`)
+  novel_df    <- novel_df    %>% rename(no_final_stress = `*BStress`)
+
+  # --------------------------
+  # Fit ATTESTED model
+  # --------------------------
+  fit_attested <- brm(
+    log_odds ~
+      (GenPref + RelFreq + CenteredOverallFreq +
+       GenPref:CenteredOverallFreq + RelFreq:CenteredOverallFreq) +
+      (GenPref + RelFreq + CenteredOverallFreq +
+       GenPref:CenteredOverallFreq + RelFreq:CenteredOverallFreq | prompt) +
+      (1 | Alpha),
+    data   = attested_df,
+    iter   = 20000,
+    warmup = 10000,
+    chains = 4,
+    cores  = 4,
+    control = list(adapt_delta=0.99, max_treedepth = 15),
+    file   = file.path(out_dir, paste0("model_attested__", model_id))
+  )
+
+  # --------------------------
+  # Fit NOVEL model
+  # --------------------------
+  fit_novel <- brm(
+    log_odds ~ GenPref + (GenPref | prompt) + (1 | Alpha),
+    data   = novel_df,
+    iter   = 20000,
+    warmup = 10000,
+    chains = 4,
+    cores  = 4,
+    control = list(adapt_delta=0.99, max_treedepth = 15),
+    file   = file.path(out_dir, paste0("model_novel__", model_id))
+  )
+
+  # --------------------------
+  # Return bundle
+  # --------------------------
+  list(
+    model_name = model_name,
+    model_id   = model_id,
+    attested   = fit_attested,
+    novel      = fit_novel
+  )
+}
+
+model_names <- unique(
+  read_csv("../Data/FINETUNED_MULTIPLE_CONDITIONS_SINGLE_PREFIX_BINOMIAL_PREFERENCES.csv")$model
+)
+
+all_models <-
+  lapply(
+    model_names,
+    run_small_model_pipeline,
+    data_csv = "../Data/FINETUNED_MULTIPLE_CONDITIONS_SINGLE_PREFIX_BINOMIAL_PREFERENCES.csv",
+    corpus   = corpus,
+    test_df  = test_df
+  )
+
+names(all_models) <- model_names
+
+fixef_attested_tbl <-
+  map_dfr(
+    all_models,
+    ~ tidy_fixef(
+        fit       = .x$attested,
+        model_tag = .x$model_id,
+        condition = "attested"
+      )
+  )
+
+fixef_novel_tbl <-
+  map_dfr(
+    all_models,
+    ~ tidy_fixef(
+        fit       = .x$novel,
+        model_tag = .x$model_id,
+        condition = "novel"
+      )
+  )
+
+fixef_all_tbl <- bind_rows(fixef_attested_tbl, fixef_novel_tbl)
+
+fixef_all_tbl
 ```
 
 
@@ -1766,6 +2336,8 @@ human_data_attested_control_1epoch_model = brm(
 ```
 ## Finetuned on hand-coded data
 
+### GenPref
+
 ```{r}
 attested_binoms = corpus %>%
   filter(Attested == 1)
@@ -1773,13 +2345,1216 @@ attested_binoms = corpus %>%
 
 set.seed(123)  # for reproducibility
 
-test_idx  <- sample(seq_len(nrow(attested_binoms)), size = 131)
-test_df  <- attested_binoms[test_idx, ]
-train_df <- attested_binoms[-test_idx, ]
+#test_idx  <- sample(seq_len(nrow(attested_binoms)), size = 131)
+# test_df  <- attested_binoms[test_idx, ]
+# train_df <- attested_binoms[-test_idx, ]
 
-write_csv(test_df, "../Data/attested_binoms_test.csv")
-write_csv(train_df, "../Data/attested_binoms_train.csv")
 
+```
+
+#### Handcoded 
+
+```{r}
+hand_models <- c(
+  "qing-yao/handcoded-finetuned-ep1_n1000_seed-42_1e-4",
+  "qing-yao/handcoded-finetuned-ep1_n2000_seed-42_1e-4",
+  "qing-yao/handcoded-finetuned-ep1_n3000_seed-42_1e-4",
+  "qing-yao/handcoded-finetuned-ep1_n4000_seed-42_1e-4",
+  "qing-yao/handcoded-finetuned-ep1_n5000_seed-42_1e-4"
+)
+
+hand_coded_data = read_csv(
+  '../Data/FINETUNED_HANDCODED_1EPOCH_MODEL_BINOMIAL_PREFERENCES.csv'
+) %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = FALSE, sep = ' ') %>%
+  select(-and) %>%
+  left_join(corpus) %>%
+  mutate(
+    y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +
+             0.41836997*Culture + 0.25967334*Power + 0.01867604*Intense +
+             1.30365980*Icon + 0.08553552*Freq + 0.15241566*Len -
+             0.19381657*Lapse + 0.36019221*`*BStress`,
+    GenPref = plogis(y_vals) - 0.5,
+    RelFreq = RelFreq - 0.5
+  )
+
+run_handcoded_model <- function(model_name) {
+
+  message("Running hand-coded model: ", model_name)
+
+  # --------------------------
+  # Filter hand-coded data
+  # --------------------------
+  hand_data_model <- hand_coded_data %>%
+    filter(model == model_name)
+
+  hand_coded_novel    <- hand_data_model %>% filter(Attested == 0)
+  hand_coded_attested <- hand_data_model %>% filter(Attested == 1)
+
+  # --------------------------
+  # ITEM-LEVEL MODELS (CORRECT)
+  # --------------------------
+  hand_item_preds_novel <- brm(
+    log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+    data   = hand_coded_novel,
+    prior  = prior_probs,
+    iter   = 18000,
+    warmup = 9000,
+    chains = 4,
+    cores  = 4,
+    file   = paste0(
+      "../Data/handcoded_item_preds_novel_",
+      gsub("/", "_", model_name)
+    )
+  )
+
+  hand_item_preds_attested <- brm(
+    log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+    data   = hand_coded_attested,
+    prior  = prior_probs,
+    iter   = 26000,
+    warmup = 13000,
+    chains = 4,
+    cores  = 4,
+    file   = paste0(
+      "../Data/handcoded_item_preds_attested_",
+      gsub("/", "_", model_name)
+    )
+  )
+
+  # --------------------------
+  # EXTRACT ITEM PREDICTIONS
+  # --------------------------
+  newdata_hand_attested <- data.frame(
+    Alpha  = unique(hand_coded_attested$Alpha),
+    prompt = NA
+  )
+
+  fit_hand_attested <- fitted(
+    hand_item_preds_attested,   # ✅ CORRECT MODEL
+    newdata    = newdata_hand_attested,
+    re_formula = ~(1 | Alpha),
+    summary    = TRUE
+  )
+
+  item_df_hand_attested <- data.frame(
+    Alpha = newdata_hand_attested$Alpha,
+    item_logodds_hand = fit_hand_attested[, "Estimate"]
+  )
+
+  human_data_attested_hand <-
+    all_human_data_attested %>%
+    left_join(item_df_hand_attested, by = "Alpha")
+
+  # --------------------------
+  # HUMAN MODEL (ATTESTED)
+  # --------------------------
+  prior_probs_hand <- c(
+    prior(normal(0, 1), class = "Intercept"),
+    prior(normal(0, 1), class = "b", coef = "item_logodds_hand"),
+    prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+    prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+  )
+
+  human_attested_model <- brm(
+    resp_binary ~ item_logodds_hand + (1 | participant) + (1 | Alpha),
+    data   = human_data_attested_hand,
+    family = bernoulli(),
+    prior  = prior_probs_hand,
+    iter   = 6000,
+    warmup = 3000,
+    chains = 4,
+    cores  = 4,
+    file   = paste0(
+      "../Data/human_data_attested_hand_",
+      gsub("/", "_", model_name)
+    )
+  ) %>% add_criterion("loo")
+
+  # --------------------------
+  # NOVEL SIDE
+  # --------------------------
+  newdata_hand_novel <- data.frame(
+    Alpha  = unique(hand_coded_novel$Alpha),
+    prompt = NA
+  )
+
+  fit_hand_novel <- fitted(
+    hand_item_preds_novel,      # ✅ CORRECT MODEL
+    newdata    = newdata_hand_novel,
+    re_formula = ~(1 | Alpha),
+    summary    = TRUE
+  )
+
+  item_df_hand_novel <- data.frame(
+    Alpha = newdata_hand_novel$Alpha,
+    item_logodds_hand = fit_hand_novel[, "Estimate"]
+  )
+
+  human_data_novel_hand <-
+    all_human_data_novel %>%
+    left_join(item_df_hand_novel, by = "Alpha")
+
+  human_novel_model <- brm(
+    resp_binary ~ item_logodds_hand + (1 | participant) + (1 | Alpha),
+    data   = human_data_novel_hand,
+    family = bernoulli(),
+    prior  = prior_probs_hand,
+    iter   = 6000,
+    warmup = 3000,
+    chains = 4,
+    cores  = 4,
+    file   = paste0(
+      "../Data/human_data_novel_hand_",
+      gsub("/", "_", model_name)
+    )
+  ) %>% add_criterion("loo")
+
+  list(
+    model = model_name,
+    attested_model = human_attested_model,
+    novel_model    = human_novel_model
+  )
+}
+
+handcoded_results <- lapply(hand_models, run_handcoded_model)
+names(handcoded_results) <- hand_models
+
+loo_compare(
+  lapply(handcoded_results, function(x) x$attested_model)
+)
+
+loo_compare(
+  lapply(handcoded_results, function(x) x$novel_model)
+)
+
+```
+
+
+#### Handcoded for 1000 sentences
+
+```{r}
+# --------------------------
+# Load 1-epoch Control model data
+# --------------------------
+hand_coded_data = read_csv(
+  '../Data/FINETUNED_HANDCODED_1EPOCH_MODEL_BINOMIAL_PREFERENCES.csv'
+) %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c('Word1', 'and', 'Word2'), remove = FALSE, sep = ' ') %>%
+  select(-and) %>%
+  left_join(corpus) %>%
+  mutate(
+    y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +
+             0.41836997*Culture + 0.25967334*Power + 0.01867604*Intense +
+             1.30365980*Icon + 0.08553552*Freq + 0.15241566*Len -
+             0.19381657*Lapse + 0.36019221*`*BStress`,
+    GenPref = plogis(y_vals) - 0.5,
+    RelFreq = RelFreq - 0.5
+  ) %>%
+  filter(model == "qing-yao/handcoded-finetuned-ep1_n1000_seed-42_1e-4")
+
+hand_coded_novel = hand_coded_data %>%
+  filter(Attested == 0)
+
+hand_coded_attested = hand_coded_data %>%
+  filter(Alpha %in% test_df$Alpha)
+
+
+newdata_hand_attested = data.frame(
+  Alpha  = unique(hand_coded_attested$Alpha),
+  prompt = NA
+)
+handcoded_item_preds_novel <- brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = hand_coded_novel,
+  prior  = prior_probs,
+  iter   = 18000,
+  warmup = 9000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/handcoded_item_preds_novel_1k"
+)
+
+handcoded_item_preds_attested <- brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = hand_coded_attested,
+  prior  = prior_probs,
+  iter   = 26000,
+  warmup = 13000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/handcoded_item_preds_attested_1k"
+)
+
+extract_item_preds <- function(fit, alphas) {
+  newdata <- data.frame(Alpha = unique(alphas), prompt = NA)
+
+  fitted(
+    fit,
+    newdata    = newdata,
+    re_formula = ~(1 | Alpha),
+    summary    = TRUE
+  )[,"Estimate"] %>%
+    setNames(newdata$Alpha) %>%
+    tibble::enframe(name = "Alpha",
+                    value = "item_logodds_hand")
+}
+
+item_df_hand_attested <-
+  extract_item_preds(handcoded_item_preds_attested,
+                     hand_coded_attested$Alpha)
+
+item_df_hand_novel <-
+  extract_item_preds(handcoded_item_preds_novel,
+                     hand_coded_novel$Alpha)
+
+
+human_data_attested_hand <-
+  all_human_data_attested %>%
+  semi_join(test_df, by = "Alpha") %>%
+  left_join(item_df_hand_attested, by = "Alpha")
+
+human_data_novel_hand <-
+  all_human_data_novel %>%
+  left_join(item_df_hand_novel, by = "Alpha")
+
+
+prior_probs_hand <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "item_logodds_hand"),
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+
+human_data_attested_hand_model <- brm(
+  resp_binary ~ item_logodds_hand + (1 | participant) + (1 | Alpha),
+  data   = human_data_attested_hand,
+  family = bernoulli(),
+  prior  = prior_probs_hand,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/human_data_attested_hand_model"
+) %>% add_criterion("loo")
+
+human_data_novel_hand_model <- brm(
+  resp_binary ~ item_logodds_hand + (1 | participant) + (1 | Alpha),
+  data   = human_data_novel_hand,
+  family = bernoulli(),
+  prior  = prior_probs_hand,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/human_data_novel_hand_model"
+) %>% add_criterion("loo")
+
+```
+
+#### Handcoded for 5000 sentences
+
+```{r}
+# --------------------------------------------------
+# Load + prepare hand-coded data (n = 5000)
+# --------------------------------------------------
+hand_coded_data_5k <- read_csv(
+  "../Data/FINETUNED_HANDCODED_1EPOCH_MODEL_BINOMIAL_PREFERENCES.csv"
+) %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c("Word1", "and", "Word2"),
+           remove = FALSE, sep = " ") %>%
+  select(-and) %>%
+  left_join(corpus) %>%
+  mutate(
+    y_vals =
+      0.02191943 +
+      0.23925834 * Form +
+      0.24889543 * Percept +
+      0.41836997 * Culture +
+      0.25967334 * Power +
+      0.01867604 * Intense +
+      1.30365980 * Icon +
+      0.08553552 * Freq +
+      0.15241566 * Len -
+      0.19381657 * Lapse +
+      0.36019221 * `*BStress`,
+    GenPref = plogis(y_vals) - 0.5,
+    RelFreq = RelFreq - 0.5
+  ) %>%
+  filter(model == "qing-yao/handcoded-finetuned-ep1_n5000_seed-42_1e-4")
+
+hand_coded_novel_5k <-
+  hand_coded_data_5k %>% filter(Attested == 0)
+
+hand_coded_attested_5k <-
+  hand_coded_data_5k %>% filter(Alpha %in% test_df$Alpha)
+
+# --------------------------------------------------
+# Item-level models (hand-coded, n = 5000)
+# --------------------------------------------------
+handcoded_item_preds_novel_5k <- brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = hand_coded_novel_5k,
+  prior  = prior_probs,
+  iter   = 18000,
+  warmup = 9000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/handcoded_item_preds_novel_5k"
+)
+
+handcoded_item_preds_attested_5k <- brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = hand_coded_attested_5k,
+  prior  = prior_probs,
+  iter   = 26000,
+  warmup = 13000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/handcoded_item_preds_attested_5k"
+)
+
+# --------------------------------------------------
+# Extract item predictions
+# --------------------------------------------------
+extract_item_preds <- function(fit, alphas) {
+  newdata <- data.frame(
+    Alpha  = unique(alphas),
+    prompt = NA
+  )
+
+  fitted(
+    fit,
+    newdata    = newdata,
+    re_formula = ~(1 | Alpha),
+    summary    = TRUE
+  )[,"Estimate"] %>%
+    setNames(newdata$Alpha) %>%
+    tibble::enframe(
+      name  = "Alpha",
+      value = "item_logodds_hand"
+    )
+}
+
+item_df_hand_attested_5k <-
+  extract_item_preds(
+    handcoded_item_preds_attested_5k,
+    hand_coded_attested_5k$Alpha
+  )
+
+item_df_hand_novel_5k <-
+  extract_item_preds(
+    handcoded_item_preds_novel_5k,
+    hand_coded_novel_5k$Alpha
+  )
+
+# --------------------------------------------------
+# Join to human data
+# --------------------------------------------------
+human_data_attested_hand_5k <-
+  all_human_data_attested %>%
+  semi_join(test_df, by = "Alpha") %>%
+  left_join(item_df_hand_attested_5k, by = "Alpha")
+
+human_data_novel_hand_5k <-
+  all_human_data_novel %>%
+  left_join(item_df_hand_novel_5k, by = "Alpha")
+
+# Safety checks
+stopifnot(!any(is.na(human_data_attested_hand_5k$item_logodds_hand)))
+stopifnot(!any(is.na(human_data_novel_hand_5k$item_logodds_hand)))
+
+# --------------------------------------------------
+# Human choice models (hand-coded, n = 5000)
+# --------------------------------------------------
+prior_probs_hand <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "item_logodds_hand"),
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+
+human_data_attested_hand_model_5k <- brm(
+  resp_binary ~ item_logodds_hand + (1 | participant) + (1 | Alpha),
+  data   = human_data_attested_hand_5k,
+  family = bernoulli(),
+  prior  = prior_probs_hand,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/human_data_attested_hand_model_5k"
+) %>% add_criterion("loo")
+
+human_data_novel_hand_model_5k <- brm(
+  resp_binary ~ item_logodds_hand + (1 | participant) + (1 | Alpha),
+  data   = human_data_novel_hand_5k,
+  family = bernoulli(),
+  prior  = prior_probs_hand,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/human_data_novel_hand_model_5k"
+) %>% add_criterion("loo")
+
+```
+
+#### 5000 2 epochs
+
+```{r}
+# --------------------------------------------------
+# Load + prepare hand-coded data (n = 5000)
+# --------------------------------------------------
+hand_coded_data_5k_2ep <- read_csv(
+  "../Data/FINETUNED_HANDCODED_MULTIPLE_EPOCH_MODEL_BINOMIAL_PREFERENCES.csv"
+) %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c("Word1", "and", "Word2"),
+           remove = FALSE, sep = " ") %>%
+  select(-and) %>%
+  left_join(corpus) %>%
+  mutate(
+    y_vals =
+      0.02191943 +
+      0.23925834 * Form +
+      0.24889543 * Percept +
+      0.41836997 * Culture +
+      0.25967334 * Power +
+      0.01867604 * Intense +
+      1.30365980 * Icon +
+      0.08553552 * Freq +
+      0.15241566 * Len -
+      0.19381657 * Lapse +
+      0.36019221 * `*BStress`,
+    GenPref = plogis(y_vals) - 0.5,
+    RelFreq = RelFreq - 0.5
+  ) %>%
+  filter(model == "qing-yao/handcoded-finetuned-ep2_n5000_seed-42_1e-4")
+
+hand_coded_novel_5k_2ep <- hand_coded_data_5k_2ep %>% filter(Attested == 0)
+
+hand_coded_attested_5k_2ep <- hand_coded_data_5k_2ep %>% filter(Alpha %in% test_df$Alpha)
+
+# --------------------------------------------------
+# Item-level models (hand-coded, n = 5000)
+# --------------------------------------------------
+handcoded_item_preds_novel_5k_2ep <- brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = hand_coded_novel_5k_2ep,
+  prior  = prior_probs,
+  iter   = 18000,
+  warmup = 9000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/handcoded_item_preds_novel_5k_2ep"
+)
+
+handcoded_item_preds_attested_5k_2ep <- brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = hand_coded_attested_5k_2ep,
+  prior  = prior_probs,
+  iter   = 26000,
+  warmup = 13000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/handcoded_item_preds_attested_5k_2ep"
+)
+
+# --------------------------------------------------
+# Extract item predictions
+# --------------------------------------------------
+extract_item_preds <- function(fit, alphas) {
+  newdata <- data.frame(
+    Alpha  = unique(alphas),
+    prompt = NA
+  )
+
+  fitted(
+    fit,
+    newdata    = newdata,
+    re_formula = ~(1 | Alpha),
+    summary    = TRUE
+  )[,"Estimate"] %>%
+    setNames(newdata$Alpha) %>%
+    tibble::enframe(
+      name  = "Alpha",
+      value = "item_logodds_hand"
+    )
+}
+
+item_df_hand_attested_5k_2ep <-
+  extract_item_preds(
+    handcoded_item_preds_attested_5k_2ep,
+    hand_coded_attested_5k_2ep$Alpha
+  )
+
+item_df_hand_novel_5k_2ep <-
+  extract_item_preds(
+    handcoded_item_preds_novel_5k_2ep,
+    hand_coded_novel_5k_2ep$Alpha
+  )
+
+# --------------------------------------------------
+# Join to human data
+# --------------------------------------------------
+human_data_attested_hand_5k_2ep <-
+  all_human_data_attested %>%
+  semi_join(test_df, by = "Alpha") %>%
+  left_join(item_df_hand_attested_5k_2ep, by = "Alpha")
+
+human_data_novel_hand_5k_2ep <-
+  all_human_data_novel %>%
+  left_join(item_df_hand_novel_5k_2ep, by = "Alpha")
+
+# Safety checks
+stopifnot(!any(is.na(human_data_attested_hand_5k_2ep$item_logodds_hand)))
+stopifnot(!any(is.na(human_data_novel_hand_5k_2ep$item_logodds_hand)))
+
+# --------------------------------------------------
+# Human choice models (hand-coded, n = 5000)
+# --------------------------------------------------
+prior_probs_hand <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "item_logodds_hand"),
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+
+human_data_attested_hand_model_5k_2ep <- brm(
+  resp_binary ~ item_logodds_hand + (1 | participant) + (1 | Alpha),
+  data   = human_data_attested_hand_5k_2ep,
+  family = bernoulli(),
+  prior  = prior_probs_hand,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/human_data_attested_hand_model_5k"
+) %>% add_criterion("loo")
+
+human_data_novel_hand_model_5k_2ep <- brm(
+  resp_binary ~ item_logodds_hand + (1 | participant) + (1 | Alpha),
+  data   = human_data_novel_hand_5k_2ep,
+  family = bernoulli(),
+  prior  = prior_probs_hand,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/human_data_novel_hand_model_5k_2ep"
+) %>% add_criterion("loo")
+
+```
+
+#### 5000 5 epochs
+
+```{r}
+# --------------------------------------------------
+# Load + prepare hand-coded data (n = 5000)
+# --------------------------------------------------
+hand_coded_data_5k_5ep <- read_csv(
+  "../Data/FINETUNED_HANDCODED_MULTIPLE_EPOCH_MODEL_BINOMIAL_PREFERENCES.csv"
+) %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c("Word1", "and", "Word2"),
+           remove = FALSE, sep = " ") %>%
+  select(-and) %>%
+  left_join(corpus) %>%
+  mutate(
+    y_vals =
+      0.02191943 +
+      0.23925834 * Form +
+      0.24889543 * Percept +
+      0.41836997 * Culture +
+      0.25967334 * Power +
+      0.01867604 * Intense +
+      1.30365980 * Icon +
+      0.08553552 * Freq +
+      0.15241566 * Len -
+      0.19381657 * Lapse +
+      0.36019221 * `*BStress`,
+    GenPref = plogis(y_vals) - 0.5,
+    RelFreq = RelFreq - 0.5
+  ) %>%
+  filter(model == "qing-yao/handcoded-finetuned-ep5_n5000_seed-42_1e-4")
+
+hand_coded_novel_5k_5ep <-
+  hand_coded_data_5k_5ep %>% filter(Attested == 0)
+
+hand_coded_attested_5k_5ep <-
+  hand_coded_data_5k_5ep %>% filter(Alpha %in% test_df$Alpha)
+
+# --------------------------------------------------
+# Item-level models (hand-coded, n = 5000)
+# --------------------------------------------------
+handcoded_item_preds_novel_5k_5ep <- brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = hand_coded_novel_5k_5ep,
+  prior  = prior_probs,
+  iter   = 18000,
+  warmup = 9000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/handcoded_item_preds_novel_5k_5ep"
+)
+
+handcoded_item_preds_attested_5k_5ep <- brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = hand_coded_attested_5k_5ep,
+  prior  = prior_probs,
+  iter   = 30000,
+  warmup = 15000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/handcoded_item_preds_attested_5k_5ep"
+)
+
+# --------------------------------------------------
+# Extract item predictions
+# --------------------------------------------------
+extract_item_preds <- function(fit, alphas) {
+  newdata <- data.frame(
+    Alpha  = unique(alphas),
+    prompt = NA
+  )
+
+  fitted(
+    fit,
+    newdata    = newdata,
+    re_formula = ~(1 | Alpha),
+    summary    = TRUE
+  )[,"Estimate"] %>%
+    setNames(newdata$Alpha) %>%
+    tibble::enframe(
+      name  = "Alpha",
+      value = "item_logodds_hand"
+    )
+}
+
+item_df_hand_attested_5k_5ep <-
+  extract_item_preds(
+    handcoded_item_preds_attested_5k_5ep,
+    hand_coded_attested_5k_5ep$Alpha
+  )
+
+item_df_hand_novel_5k_5ep <-
+  extract_item_preds(
+    handcoded_item_preds_novel_5k_5ep,
+    hand_coded_novel_5k_5ep$Alpha
+  )
+
+# --------------------------------------------------
+# Join to human data
+# --------------------------------------------------
+human_data_attested_hand_5k_5ep <-
+  all_human_data_attested %>%
+  semi_join(test_df, by = "Alpha") %>%
+  left_join(item_df_hand_attested_5k_5ep, by = "Alpha")
+
+human_data_novel_hand_5k_5ep <-
+  all_human_data_novel %>%
+  left_join(item_df_hand_novel_5k_5ep, by = "Alpha")
+
+# Safety checks
+stopifnot(!any(is.na(human_data_attested_hand_5k_5ep$item_logodds_hand)))
+stopifnot(!any(is.na(human_data_novel_hand_5k_5ep$item_logodds_hand)))
+
+# --------------------------------------------------
+# Human choice models (hand-coded, n = 5000)
+# --------------------------------------------------
+prior_probs_hand <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "item_logodds_hand"),
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+
+human_data_attested_hand_model_5k_5ep <- brm(
+  resp_binary ~ item_logodds_hand + (1 | participant) + (1 | Alpha),
+  data   = human_data_attested_hand_5k_5ep,
+  family = bernoulli(),
+  prior  = prior_probs_hand,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/human_data_attested_hand_model_5k_5ep"
+) %>% add_criterion("loo")
+
+human_data_novel_hand_model_5k_5ep <- brm(
+  resp_binary ~ item_logodds_hand + (1 | participant) + (1 | Alpha),
+  data   = human_data_novel_hand_5k_5ep,
+  family = bernoulli(),
+  prior  = prior_probs_hand,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/human_data_novel_hand_model_5k_5ep"
+) %>% add_criterion("loo")
+
+```
+
+#### 5000 10 epochs
+
+```{r}
+# --------------------------------------------------
+# Load + prepare hand-coded data (n = 5000)
+# --------------------------------------------------
+hand_coded_data_5k_10ep <- read_csv(
+  "../Data/FINETUNED_HANDCODED_MULTIPLE_EPOCH_MODEL_BINOMIAL_PREFERENCES.csv"
+) %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c("Word1", "and", "Word2"),
+           remove = FALSE, sep = " ") %>%
+  select(-and) %>%
+  left_join(corpus) %>%
+  mutate(
+    y_vals =
+      0.02191943 +
+      0.23925834 * Form +
+      0.24889543 * Percept +
+      0.41836997 * Culture +
+      0.25967334 * Power +
+      0.01867604 * Intense +
+      1.30365980 * Icon +
+      0.08553552 * Freq +
+      0.15241566 * Len -
+      0.19381657 * Lapse +
+      0.36019221 * `*BStress`,
+    GenPref = plogis(y_vals) - 0.5,
+    RelFreq = RelFreq - 0.5
+  ) %>%
+  filter(model == "qing-yao/handcoded-finetuned-ep10_n5000_seed-42_1e-4")
+
+hand_coded_novel_5k_10ep <-
+  hand_coded_data_5k_10ep %>% filter(Attested == 0)
+
+hand_coded_attested_5k_10ep <-
+  hand_coded_data_5k_10ep %>% filter(Alpha %in% test_df$Alpha)
+
+# --------------------------------------------------
+# Item-level models (hand-coded, n = 5000)
+# --------------------------------------------------
+handcoded_item_preds_novel_5k_10ep <- brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = hand_coded_novel_5k_10ep,
+  prior  = prior_probs,
+  iter   = 18000,
+  warmup = 9000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/handcoded_item_preds_novel_5k_10ep"
+)
+
+handcoded_item_preds_attested_5k_10ep <- brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = hand_coded_attested_5k_10ep,
+  prior  = prior_probs,
+  iter   = 26000,
+  warmup = 13000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/handcoded_item_preds_attested_5k_10ep"
+)
+
+# --------------------------------------------------
+# Extract item predictions
+# --------------------------------------------------
+extract_item_preds <- function(fit, alphas) {
+  newdata <- data.frame(
+    Alpha  = unique(alphas),
+    prompt = NA
+  )
+
+  fitted(
+    fit,
+    newdata    = newdata,
+    re_formula = ~(1 | Alpha),
+    summary    = TRUE
+  )[,"Estimate"] %>%
+    setNames(newdata$Alpha) %>%
+    tibble::enframe(
+      name  = "Alpha",
+      value = "item_logodds_hand"
+    )
+}
+
+item_df_hand_attested_5k_10ep <-
+  extract_item_preds(
+    handcoded_item_preds_attested_5k_10ep,
+    hand_coded_attested_5k_10ep$Alpha
+  )
+
+item_df_hand_novel_5k_10ep <-
+  extract_item_preds(
+    handcoded_item_preds_novel_5k_10ep,
+    hand_coded_novel_5k_10ep$Alpha
+  )
+
+# --------------------------------------------------
+# Join to human data
+# --------------------------------------------------
+human_data_attested_hand_5k_10ep <-
+  all_human_data_attested %>%
+  semi_join(test_df, by = "Alpha") %>%
+  left_join(item_df_hand_attested_5k_10ep, by = "Alpha")
+
+human_data_novel_hand_5k_10ep <-
+  all_human_data_novel %>%
+  left_join(item_df_hand_novel_5k_10ep, by = "Alpha")
+
+# Safety checks
+stopifnot(!any(is.na(human_data_attested_hand_5k_10ep$item_logodds_hand)))
+stopifnot(!any(is.na(human_data_novel_hand_5k_10ep$item_logodds_hand)))
+
+# --------------------------------------------------
+# Human choice models (hand-coded, n = 5000)
+# --------------------------------------------------
+prior_probs_hand <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "item_logodds_hand"),
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+
+human_data_attested_hand_model_5k_10ep <- brm(
+  resp_binary ~ item_logodds_hand + (1 | participant) + (1 | Alpha),
+  data   = human_data_attested_hand_5k_10ep,
+  family = bernoulli(),
+  prior  = prior_probs_hand,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/human_data_attested_hand_model_5k_10ep"
+) %>% add_criterion("loo")
+
+human_data_novel_hand_model_5k_10ep <- brm(
+  resp_binary ~ item_logodds_hand + (1 | participant) + (1 | Alpha),
+  data   = human_data_novel_hand_5k_10ep,
+  family = bernoulli(),
+  prior  = prior_probs_hand,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/human_data_novel_hand_model_5k_10ep"
+) %>% add_criterion("loo")
+
+```
+
+# GenPref Baseline Simplified Prompt Comparison
+
+```{r}
+library(tidyverse)
+library(brms)
+prior_item <- c(
+  # Global mean log-odds
+  prior(normal(0, 1), class = "Intercept"),
+
+  # Item-to-item variability
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha"),
+
+  # Prompt-to-prompt variability
+  prior(student_t(3, 0, 1), class = "sd", group = "prompt")
+)
+prior_human <- c(
+  # Baseline response bias
+  prior(normal(0, 1), class = "Intercept"),
+
+  # Effect of model-predicted log-odds on human choice
+  prior(normal(0, 1), class = "b", coef = "item_logodds_hand"),
+
+  # Participant variability
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+
+  # Item variability
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+
+# --------------------------------------------------
+# Load unified CSV
+# --------------------------------------------------
+all_llm_data <- read_csv(
+  "../Data/FINETUNED_MULTIPLE_CONDITIONS_SINGLE_PREFIX_BINOMIAL_PREFERENCES.csv"
+) %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c("Word1", "and", "Word2"),
+           remove = FALSE, sep = " ") %>%
+  select(-and) %>%
+  left_join(corpus) %>%
+  mutate(
+    y_vals =
+      0.02191943 +
+      0.23925834 * Form +
+      0.24889543 * Percept +
+      0.41836997 * Culture +
+      0.25967334 * Power +
+      0.01867604 * Intense +
+      1.30365980 * Icon +
+      0.08553552 * Freq +
+      0.15241566 * Len -
+      0.19381657 * Lapse +
+      0.36019221 * `*BStress`,
+    GenPref = plogis(y_vals) - 0.5,
+    RelFreq = RelFreq - 0.5
+  )
+
+
+extract_item_preds <- function(fit, alphas) {
+  newdata <- data.frame(
+    Alpha  = unique(alphas),
+    prompt = NA
+  )
+
+  fitted(
+    fit,
+    newdata    = newdata,
+    re_formula = ~(1 | Alpha),
+    summary    = TRUE
+  )[,"Estimate"] %>%
+    setNames(newdata$Alpha) %>%
+    tibble::enframe(
+      name  = "Alpha",
+      value = "item_logodds_hand"
+    )
+}
+
+run_model_pipeline <- function(model_name,
+                               llm_data,
+                               human_attested,
+                               human_novel,
+                               prior_item,
+                               prior_human,
+                               tag) {
+
+  message("Running model: ", model_name)
+
+  # --------------------------
+  # Subset LLM data
+  # --------------------------
+  model_df <- llm_data %>% filter(model == model_name)
+  n_prompts <- model_df %>% distinct(prompt) %>% nrow()
+
+  novel_df     <- model_df %>% filter(Attested == 0)
+  attested_df  <- model_df %>% filter(Alpha %in% test_df$Alpha)
+
+  # --------------------------
+  # Item-level estimates
+  # --------------------------
+  if (n_prompts > 1) {
+  
+    message("→ Multiple prompts detected (", n_prompts, "); fitting item-level models")
+  
+    item_novel <- brm(
+      log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+      data   = novel_df,
+      prior  = prior_item,
+      iter   = 18000,
+      warmup = 9000,
+      chains = 4,
+      cores  = 4,
+      file   = glue::glue("../Data/item_preds_novel_{tag}")
+    )
+  
+    item_attested <- brm(
+      log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+      data   = attested_df,
+      prior  = prior_item,
+      iter   = 26000,
+      warmup = 13000,
+      chains = 4,
+      cores  = 4,
+      file   = glue::glue("../Data/item_preds_attested_{tag}")
+    )
+  
+    item_df_novel <- extract_item_preds(item_novel, novel_df$Alpha)
+    item_df_att   <- extract_item_preds(item_attested, attested_df$Alpha)
+  
+  } else {
+  
+    message("→ Single prompt detected; using raw model log_odds")
+  
+    item_df_novel <-
+      novel_df %>%
+      group_by(Alpha) %>%
+      summarise(
+        item_logodds_hand = mean(log_odds),
+        .groups = "drop"
+      )
+  
+    item_df_att <-
+      attested_df %>%
+      group_by(Alpha) %>%
+      summarise(
+        item_logodds_hand = mean(log_odds),
+        .groups = "drop"
+      )
+  }
+
+
+  # --------------------------
+  # Join to human data
+  # --------------------------
+  human_novel_joined <- human_novel %>%
+    left_join(item_df_novel, by = "Alpha")
+
+  human_att_joined <- human_attested %>%
+    semi_join(test_df, by = "Alpha") %>%
+    left_join(item_df_att, by = "Alpha")
+
+  stopifnot(!any(is.na(human_novel_joined$item_logodds_hand)))
+  stopifnot(!any(is.na(human_att_joined$item_logodds_hand)))
+
+  # --------------------------
+  # Human choice models
+  # --------------------------
+  human_novel_fit <- brm(
+    resp_binary ~ item_logodds_hand + (1 | participant) + (1 | Alpha),
+    data   = human_novel_joined,
+    family = bernoulli(),
+    prior  = prior_human,
+    iter   = 6000,
+    warmup = 3000,
+    chains = 4,
+    cores  = 4,
+    file   = glue::glue("../Data/human_novel_{tag}")
+  ) %>% add_criterion("loo")
+
+  human_att_fit <- brm(
+    resp_binary ~ item_logodds_hand + (1 | participant) + (1 | Alpha),
+    data   = human_att_joined,
+    family = bernoulli(),
+    prior  = prior_human,
+    iter   = 6000,
+    warmup = 3000,
+    chains = 4,
+    cores  = 4,
+    file   = glue::glue("../Data/human_attested_{tag}")
+  ) %>% add_criterion("loo")
+
+  list(
+    model          = model_name,
+    novel_model    = human_novel_fit,
+    attested_model = human_att_fit
+  )
+}
+
+model_names <- unique(all_llm_data$model)
+
+results <- purrr::map(
+  model_names,
+  ~ run_model_pipeline(
+      model_name     = .x,
+      llm_data       = all_llm_data,
+      human_attested = all_human_data_attested,
+      human_novel    = all_human_data_novel,
+      prior_item     = prior_item,
+      prior_human    = prior_human,
+      tag            = gsub("/", "_", .x)
+    )
+)
+
+names(results) <- model_names
+
+loo_attested <- loo_compare(
+  purrr::map(results, function(x) x$attested_model$criteria$loo)
+)
+
+
+print(loo_attested)
+
+loo_novel <- loo_compare(
+  purrr::map(results, function(x) x$novel_model$criteria$loo)
+)
+
+print(loo_novel)
+
+
+```
+
+
+### Baseline
+
+```{r}
+
+all_human_data_attested_coded = all_human_data %>%
+  filter(Alpha %in% test_df$Alpha)
+
+
+baseline_model_data_attested_coded =
+  baseline_model_data %>%
+  filter(Alpha %in% test_df$Alpha)
+
+baseline_coded_item_preds_attested = brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = baseline_model_data_attested_coded,
+  prior  = prior_probs,
+  iter   = 30000,
+  warmup = 15000,
+  chains = 4,
+  cores  = 4,
+  file   = '../Data/baseline_coded_item_preds_attested'
+)
+
+newdata_attested_coded = data.frame(
+  Alpha  = unique(baseline_model_data_attested_coded$Alpha),
+  prompt = NA
+)
+
+fitB_attested_coded = fitted(
+  baseline_coded_item_preds_attested,
+  newdata    = newdata_attested_coded,
+  re_formula = ~(1 | Alpha),
+  summary    = TRUE
+)
+
+item_df_baseline_attested_coded = data.frame(
+  Alpha = newdata_attested_coded$Alpha,
+  item_logodds_baseline = fitB_attested_coded[, "Estimate"]
+)
+
+human_data_attested_baseline_data = all_human_data_attested_coded %>%
+  left_join(item_df_baseline_attested_coded, by = 'Alpha')
+
+prior_probs2 <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "item_logodds_baseline"),
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+
+human_data_attested_baseline_model = brm(
+  resp_binary ~ item_logodds_baseline + (1 | participant) + (1 | Alpha),
+  data   = human_data_attested_baseline_data,
+  family = bernoulli(),
+  prior  = prior_probs2,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = '../Data/human_data_attested_baseline_model'
+) %>% add_criterion("loo")
+
+
+```
+
+### RelFreq
+
+```{r}
+
+```
+
+
+### Control
+
+
+```{r}
 
 ```
 
@@ -1797,7 +3572,9 @@ loo_results_novel = loo_compare(
   human_data_novel_relfreq_model,
   human_data_novel_relfreq_1epoch_model,
   human_data_novel_control_model,
-  human_data_novel_control_1epoch_model
+  human_data_novel_control_1epoch_model,
+  human_data_novel_hand_model,
+  human_data_novel_hand_model_5k
 )
 
 loo_results_attested = loo_compare(
@@ -1811,9 +3588,23 @@ loo_results_attested = loo_compare(
   human_data_attested_control_1epoch_model
 )
 
+loo_compare(human_data_novel_baseline,
+            human_data_novel_hand_model,
+            human_data_novel_hand_model_5k,
+            human_data_novel_hand_model_5k_2ep,
+            human_data_novel_hand_model_5k_5ep,
+            human_data_novel_hand_model_5k_10ep)
 
+loo_compare(human_data_attested_baseline_model,
+            human_data_attested_hand_model,
+            human_data_attested_hand_model_5k,
+            human_data_attested_hand_model_5k_2ep,
+            human_data_attested_hand_model_5k_5ep,
+            human_data_attested_hand_model_5k_10ep)
 
 loo_results_novel
 loo_results_attested
 ```
+
+
 

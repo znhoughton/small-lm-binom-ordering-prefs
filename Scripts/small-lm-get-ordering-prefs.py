@@ -174,8 +174,18 @@ def main():
         #for epoch in epochs
         #for lr in lrs
         #"qing-yao/relfreq-finetuned-ep10_seed-42_1e-4"
-        "qing-yao/genfreq-finetuned-ep1_seed-42_1e-4"
+        #"qing-yao/genfreq-finetuned-ep1_seed-42_1e-4"
         #"qing-yao/genfreq-finetuned_seed-42_5e-5"
+        #"qing-yao/handcoded-finetuned-ep1_n1000_seed-42_1e-4",
+        #"qing-yao/handcoded-finetuned-ep1_n2000_seed-42_1e-4",
+        #"qing-yao/handcoded-finetuned-ep1_n3000_seed-42_1e-4",
+        #"qing-yao/handcoded-finetuned-ep1_n4000_seed-42_1e-4",
+        #"qing-yao/handcoded-finetuned-ep1_n5000_seed-42_1e-4"
+        #"qing-yao/handcoded-finetuned-ep2_n5000_seed-42_1e-4",
+        #"qing-yao/handcoded-finetuned-ep5_n5000_seed-42_1e-4",
+        #"qing-yao/handcoded-finetuned-ep10_n5000_seed-42_1e-4"
+        #"EleutherAI/pythia-160m",
+        "qing-yao/genfreq-finetuned-ep2_seed-42_1e-4"
     ]
 
     all_results = []
@@ -196,7 +206,7 @@ def main():
     #  SAVE MASTER CSV
     # ================================================
     final_df = pd.concat(all_results, ignore_index=True)
-    out_path = '../Data/FINETUNED_GENPREF_1EPOCH_MODEL_BINOMIAL_PREFERENCES.csv'
+    out_path = '../Data/PYTHIA_GENPREF_MODEL_BINOMIAL_PREFERENCES.csv'
     #change to ALL_MODELS_ALL_PROMPTS.csv when just want nonce binoms
     final_df.to_csv(out_path, index=False)
 
