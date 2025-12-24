@@ -209,8 +209,6 @@ fixef(pythia_model_novel_genpref)
 
 ### Human Analysis
 
-
-
 #### GPT OSS 120B Coded Data
 
 ```{r}

@@ -187,7 +187,8 @@ def main():
         #"EleutherAI/pythia-160m",
         #"qing-yao/handcoded-finetuned-ep10_seed-42_1e-4",
         #"EleutherAI/pythia-410m",
-        "EleutherAI/pythia-1b"
+        #"EleutherAI/pythia-1b"
+        "qing-yao/genpref-finetuned-ep10_seed-42_1e-4"
     ]
 
     all_results = []
@@ -208,7 +209,7 @@ def main():
     #  SAVE MASTER CSV
     # ================================================
     final_df = pd.concat(all_results, ignore_index=True)
-    out_path = '../Data/PYTHIA_1B_BASE_MODEL_BINOMIAL_PREFERENCES.csv'
+    out_path = '../Data/PYTHIA_SAMPLED_10EP_MODEL_BINOMIAL_PREFERENCES.csv'
     #change to ALL_MODELS_ALL_PROMPTS.csv when just want nonce binoms
     final_df.to_csv(out_path, index=False)
 
