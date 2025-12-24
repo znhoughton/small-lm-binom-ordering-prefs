@@ -1638,6 +1638,52 @@ fixef(joint_genpref_novel_5ep)
 fixef(joint_genpref_attested_5ep)
 ```
 
+### 10 epochs
+
+```{r}
+human_data_novel_joint_10ep <-
+  build_joint_human_df(
+    human_df = all_human_data_novel,
+    item_df_1 = item_df_pythia_novel,
+    col_1  = "item_logodds_pythia",
+    name_1 = "z_pythia",
+    item_df_2 = item_df_pythia_genpref_novel_10ep,
+    col_2  = "item_logodds_pythia_genpref",
+    name_2 = "z_pythia_genpref"
+  )
+
+human_data_attested_joint_10ep <-
+  build_joint_human_df(
+    human_df = all_human_data_attested,
+    item_df_1 = item_df_pythia_attested,
+    col_1  = "item_logodds_pythia",
+    name_1 = "z_pythia",
+    item_df_2 = item_df_pythia_genpref_attested_10ep,
+    col_2  = "item_logodds_pythia_genpref",
+    name_2 = "z_pythia_genpref"
+  )
+
+joint_genpref_novel_10ep <-
+  fit_joint_model(
+    df = human_data_novel_joint_10ep,
+    pred_1 = "z_pythia",
+    pred_2 = "z_pythia_genpref",
+    file_stub = "../Data/human_data_novel_joint_genpref_10ep"
+  )
+
+joint_genpref_attested_10ep <-
+  fit_joint_model(
+    df = human_data_attested_joint_10ep,
+    pred_1 = "z_pythia",
+    pred_2 = "z_pythia_genpref",
+    file_stub = "../Data/human_data_attested_joint_genpref_10ep"
+  )
+
+
+fixef(joint_genpref_novel_10ep)
+fixef(joint_genpref_attested_10ep)
+```
+
 
 ## Handcoded
 
