@@ -355,13 +355,13 @@ simulated_data1_collapsed = simulated_data1 %>%
   mutate(num_sentences = n()) %>%
   slice_head(n = 1)
 
-write_csv(simulated_data1_collapsed, "../Data/fintetuning-binoms-sampled-without-constraints-coded.csv")
+#write_csv(simulated_data1_collapsed, "../Data/fintetuning-binoms-sampled-without-constraints-coded.csv")
 
-binoms_with_genpref = read_csv('../Data/sampled_binomials_coded.csv') %>%
-  uncount(num_sentences) %>%
+binoms_with_genpref = read_csv('../Data/genpref-data-sampled-without-sentences.csv') %>%
   mutate(Freq = log(WordA_Unigram) - log(WordB_Unigram),
          Len = Length,
-         '*BStress' = BStress)
+         '*BStress' = BStress) %>%
+  mutate(Alpha = paste0(WordA, " and ", WordB))
 
 
 binoms_with_genpref = binoms_with_genpref %>%
@@ -405,25 +405,16 @@ pred_summ = fitted(
 # on the response scale (probabilities, because family = bernoulli)
 finetuning_corpus_with_model_preds = cbind(binoms_with_genpref, pred_summ) %>%
   mutate(item = row_number()) %>%
-  mutate(predicted_resp_value = rbinom(n(), size = 1, prob = Estimate))
-
-finetuning_corpus_with_model_preds = finetuning_corpus_with_model_preds %>%
+  uncount(num_sentences) %>%
+  mutate(predicted_resp_value = rbinom(n(), size = 1, prob = Estimate)) %>%
   mutate(predicted_resp = case_when(
     predicted_resp_value == 1 ~ paste0(WordA, ' and ', WordB),
     predicted_resp_value == 0 ~ paste0(WordB, ' and ', WordA)
   ))
 
 
-binoms_with_estimate #= read_csv blah blah
 
-finetuning_genpref_cond = read_csv("../Data/finetuning_condition_handcoded.csv") %>%
-  mutate(binom_prob = OverallFreq / sum(OverallFreq)) %>%
-  select(-GeneratedSentence) %>%
-  mutate(predicted_resp = rbinom(), size = 1, prob = Estimate)
-
-
-
-write_csv(simulated_data, '../Data/oss120b-coded-genpref-data-sampled-without-sentences.csv')
+write_csv(finetuning_corpus_with_model_preds, '../Data/oss120b-coded-genpref-data-sampled-without-sentences.csv')
 ```
 
 ## Create HANDCODED dataset matched with overall frequency
@@ -464,13 +455,17 @@ write_csv(simulated_data, '../Data/hand-coded-data-sampled-without-sentences.csv
 # Create RELFREQ
 
 ```{r}
-finetuning_genpref_cond = read_csv("../Data/finetuning_condition_handcoded.csv") %>%
-  mutate(binom_prob = OverallFreq / sum(OverallFreq)) %>%
-  select(-GeneratedSentence) %>%
-  mutate(predicted_resp = rbinom(), size = 1, prob = RelFreq)
+relfreq_data = binoms_with_genpref %>%
+  mutate(item = row_number()) %>%
+  uncount(num_sentences) %>%
+  mutate(predicted_resp_value = rbinom(n(), size = 1, prob = (RelFreq+0.5))) %>%
+  mutate(predicted_resp = case_when(
+    predicted_resp_value == 1 ~ paste0(WordA, ' and ', WordB),
+    predicted_resp_value == 0 ~ paste0(WordB, ' and ', WordA)
+  ))
 
 
 
-write_csv(simulated_data, '../Data/oss120b-coded-relfreq-data-sampled-without-sentences.csv')
+write_csv(relfreq_data, '../Data/oss120b-coded-relfreq-data-sampled-without-sentences.csv')
 ```
 
