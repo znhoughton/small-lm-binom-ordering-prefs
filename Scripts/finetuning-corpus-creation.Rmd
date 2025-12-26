@@ -377,6 +377,8 @@ binoms_with_genpref = binoms_with_genpref %>%
 
 #write_csv(binoms_filtered, "../Data/fintetuning-binoms-with-constraints-coded.csv")
 
+test = read_csv("../Data/finetuning-binoms-with-constraints-coded.csv")
+
 m1 = brm(
   resp ~ GenPref + RelFreq + LogCenteredOverallFreq + GenPref:LogCenteredOverallFreq + RelFreq:LogCenteredOverallFreq + (GenPref + RelFreq + LogCenteredOverallFreq + GenPref:LogCenteredOverallFreq + RelFreq:LogCenteredOverallFreq | participant) + (1 | Item),
   data = human_data,
@@ -414,7 +416,8 @@ finetuning_corpus_with_model_preds = cbind(binoms_with_genpref, pred_summ) %>%
 
 
 
-write_csv(finetuning_corpus_with_model_preds, '../Data/oss120b-coded-genpref-data-sampled-without-sentences.csv')
+#write_csv(finetuning_corpus_with_model_preds, '../Data/oss120b-coded-genpref-data-sampled-without-sentences.csv')
+
 ```
 
 ## Create HANDCODED dataset matched with overall frequency

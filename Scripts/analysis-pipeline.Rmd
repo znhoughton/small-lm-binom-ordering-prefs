@@ -1,0 +1,409 @@
+---
+title: "analysis-pipeline"
+output: html_document
+date: "2025-12-25"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## load data
+
+```{r}
+library(tidyverse)
+library(brms)
+library(lme4)
+
+test_df  = read_csv('../Data/attested_binoms_test.csv')
+train_df = read_csv('../Data/attested_binoms_train.csv')
+
+
+# all_human_data = nonce_data
+all_human_data = read_csv('../Human Data and Analyses/all_human_data.csv') %>%
+  mutate(Attested = ifelse(
+    OverallFreq == 0, 0, 1
+  )) %>%
+  select(participant, resp, Word1, Word2, Alpha, Nonalpha, OverallFreq, Word1_freq, Word2_freq, Form, Percept, Culture, Power, Intense, Icon, Freq, Len, Lapse, "*BStress", RelFreq, GenPref, Attested) %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5)
+
+all_human_data = all_human_data %>%
+  mutate(resp_binary = case_when(
+    resp == 'alpha' ~ 1,
+    resp == 'nonalpha' ~ 0
+  ))
+
+all_human_data_novel    = all_human_data %>% filter(Attested == 0)
+all_human_data_attested = all_human_data %>% filter(Attested == 1)
+
+
+
+options(contrasts = c("contr.sum","contr.sum"))
+
+corpus = read_csv('../Data/nonce_and_attested_binoms.csv')
+model_preds_data = read_csv("../Data/grid_search_data")
+all_model_preds = model_preds_data
+all_pythia_results = all_model_preds
+
+```
+
+
+
+## functions
+
+
+```{r}
+
+
+
+extract_slope = function(res, which = c("attested","novel")) {
+
+  which = match.arg(which)
+
+  fit =
+    if (which == "attested") res$fit_human_attested
+    else                     res$fit_human_novel
+
+  # Skip failed runs
+  if (is.null(fit) || !is.null(res$error) && res$error) return(NULL)
+
+  # ----------------------------
+  # brms backend
+  # ----------------------------
+  if (inherits(fit, "brmsfit")) {
+
+    fe = fixef(fit)
+
+    slope_row = grep("item_logodds", rownames(fe), value = TRUE)
+
+    return(tibble(
+      backend  = "brms",
+      term     = slope_row,
+      estimate = fe[slope_row, "Estimate"],
+      se       = fe[slope_row, "Est.Error"],
+      lo       = fe[slope_row, "Q2.5"],
+      hi       = fe[slope_row, "Q97.5"]
+    ))
+  }
+
+  # ----------------------------
+  # lmer backend
+  # ----------------------------
+  if (inherits(fit, "glmerMod")) {
+
+    fe = summary(fit)$coefficients
+
+    slope_row = grep("item_logodds", rownames(fe), value = TRUE)
+
+    return(tibble(
+      backend  = "lmer",
+      term     = slope_row,
+      estimate = fe[slope_row, "Estimate"],
+      se       = fe[slope_row, "Std. Error"],
+      zvalue   = fe[slope_row, "z value"]
+    ))
+  }
+
+  stop("Unknown model class")
+}
+
+# ----------------------------
+# ITEM MODEL ADAPTER
+# ----------------------------
+fit_item_model = function(formula, data, backend, save_file=NULL) {
+
+  if (backend == "brms") {
+
+    brm(
+      formula,
+      data   = data,
+      prior  = c(
+        prior(normal(0, 1), class = "Intercept"),
+        prior(student_t(3, 0, 1), class = "sd"),
+        prior(student_t(3, 0, 1), class = "sigma")
+      ),
+      iter   = 2000,
+      warmup = 1000,
+      chains = 4,
+      cores  = 4,
+      file   = save_file
+    )
+
+  } else if (backend == "lmer") {
+
+    lmer(
+      formula,
+      data = data,
+      REML = FALSE
+    )
+
+  } else stop("backend must be 'brms' or 'lmer'")
+}
+
+
+# ----------------------------
+# HUMAN MODEL ADAPTER
+# ----------------------------
+fit_human_model = function(formula, data, backend, save_file=NULL) {
+
+  if (backend == "brms") {
+
+    brm(
+      formula,
+      data      = data,
+      family    = bernoulli(),
+      prior     = prior(normal(0, 1), class="b"),
+      iter      = 6000,
+      warmup    = 3000,
+      chains    = 4,
+      cores     = 4,
+      save_pars = save_pars(all = TRUE),
+      file      = save_file
+    ) %>% add_criterion("loo")
+
+  } else if (backend == "lmer") {
+
+    glmer(
+      formula,
+      data   = data,
+      family = binomial,
+      control = glmerControl(optimizer="bobyqa"),
+      nAGQ = 1
+    )
+
+  } else stop("backend must be 'brms' or 'lmer'")
+}
+
+
+extract_item_preds_backend = function(fit, alphas, prefix, backend) {
+
+  alphas_chr = unique(as.character(alphas))
+
+  newdata = data.frame(
+    Alpha  = alphas_chr,
+    prompt = NA_character_
+  )
+
+  if (backend == "lmer") {
+
+    preds = predict(
+      fit,
+      newdata = newdata,
+      re.form = ~(1 | Alpha),
+      allow.new.levels = TRUE
+    )
+
+    tibble(
+      Alpha = newdata$Alpha,
+      !!paste0("item_logodds_", prefix) := preds
+    )
+
+  } else {
+
+    fit_mat = fitted(
+      fit,
+      newdata          = newdata,
+      re_formula       = ~(1 | Alpha),
+      summary          = TRUE,
+      allow_new_levels = TRUE
+    )
+
+    tibble(
+      Alpha = newdata$Alpha,
+      !!paste0("item_logodds_", prefix) := fit_mat[, "Estimate"],
+      !!paste0("item_lo_", prefix)      := fit_mat[, "Q2.5"],
+      !!paste0("item_hi_", prefix)      := fit_mat[, "Q97.5"]
+    )
+  }
+}
+
+
+is_handcoded = function(model_name) {
+  grepl("handcoded", model_name, ignore.case = TRUE)
+}
+run_pythia_pipeline = function(
+  model_name,
+  all_model_preds,
+  corpus,
+  all_human_data_novel,
+  all_human_data_attested,
+  test_df,
+  save_stub,
+  backend = "brms"
+) {
+
+  message("Running pipeline for: ", model_name)
+
+  handcoded_flag = is_handcoded(model_name)
+
+  model_df =
+    all_model_preds %>%
+    filter(model == model_name) %>%
+    mutate(log_odds = preference) %>%
+    separate(binom, c("Word1","and","Word2"), remove=FALSE, sep=" ") %>%
+    select(-and) %>%
+    left_join(corpus, by=c("Word1","Word2")) %>%
+    mutate(
+      y_vals =
+        0.02191943 + 0.23925834*Form +  0.24889543*Percept +
+        0.41836997*Culture + 0.25967334*Power +
+        0.01867604*Intense + 1.30365980*Icon +
+        0.08553552*Freq + 0.15241566*Len -
+        0.19381657*Lapse + 0.36019221*`*BStress`,
+      GenPref = plogis(y_vals) - 0.5,
+      RelFreq = RelFreq - 0.5
+    ) %>%
+    ungroup()
+
+  model_novel   = filter(model_df, Attested == 0)
+  model_attested =
+    if (handcoded_flag) filter(model_df, Alpha %in% test_df$Alpha)
+    else                filter(model_df, Attested == 1)
+
+  prefix = if (handcoded_flag) "pythia_handcoded" else "pythia_genpref"
+
+  # ---------------------------
+  # ITEM MODELS
+  # ---------------------------
+  item_formula = log_odds ~ 1 + (1|Alpha) + (1|prompt)
+
+  fit_item_novel =
+    fit_item_model(item_formula, model_novel, backend,
+                   save_file = paste0(save_stub,"_item_novel"))
+
+  fit_item_attested =
+    fit_item_model(item_formula, model_attested, backend,
+                   save_file = paste0(save_stub,"_item_att"))
+
+  # predictions
+  item_novel =
+    extract_item_preds_backend(fit_item_novel, model_novel$Alpha, prefix, backend)
+
+  item_att =
+    extract_item_preds_backend(fit_item_attested, model_attested$Alpha, prefix, backend)
+
+
+  # ---------------------------
+  # JOIN TO HUMAN DATA
+  # ---------------------------
+  human_novel =
+    all_human_data_novel %>%
+    semi_join(item_novel, by="Alpha") %>%
+    left_join(item_novel, by="Alpha")
+
+  human_att =
+    (if (handcoded_flag)
+      all_human_data_attested %>% semi_join(test_df, by="Alpha")
+    else
+      all_human_data_attested %>% semi_join(item_att, by="Alpha")
+    ) %>%
+    left_join(item_att, by="Alpha")
+
+
+  slope_var = paste0("item_logodds_", prefix)
+
+  human_formula = as.formula(
+  paste0("resp_binary ~ ",
+         slope_var,
+         " + (1|participant) + (1|Alpha)")
+)
+
+
+  # ---------------------------
+  # HUMAN MODELS
+  # ---------------------------
+  fit_human_novel =
+    fit_human_model(human_formula, human_novel, backend,
+                    save_file = paste0(save_stub,"_human_novel"))
+
+  fit_human_att =
+    fit_human_model(human_formula, human_att, backend,
+                    save_file = paste0(save_stub,"_human_att"))
+
+  list(
+    backend = backend,
+    handcoded = handcoded_flag,
+    item_novel = item_novel,
+    item_attested = item_att,
+    fit_item_novel = fit_item_novel,
+    fit_item_attested = fit_item_attested,
+    fit_human_novel = fit_human_novel,
+    fit_human_attested = fit_human_att
+  )
+}
+
+```
+
+
+```{r}
+model_list = all_model_preds %>%
+  distinct(model) %>%
+  pull(model)
+
+make_stub = function(model_name) {
+  clean = gsub("[^A-Za-z0-9]+", "_", model_name)
+  file.path("../Data", clean)
+}
+
+backend_choice = "brms"   # or "lmer"
+
+all_results = vector("list", length(model_list))
+names(all_results) = model_list
+
+for (m in model_list) {
+
+  message("--------------")
+  message(" Running: ", m)
+  message("--------------")
+
+  stub = make_stub(m)
+
+  all_results[[m]] =
+    tryCatch(
+      run_pythia_pipeline(
+        model_name = m,
+        all_model_preds = all_model_preds,
+        corpus = corpus,
+        all_human_data_novel = all_human_data_novel,
+        all_human_data_attested = all_human_data_attested,
+        test_df = test_df,
+        save_stub = stub,
+        backend = backend_choice
+      ),
+      error = function(e) {
+        message("❌ ERROR in ", m, ": ", e$message)
+        list(error = TRUE)
+      }
+    )
+}
+
+
+coef_table_attested = map_df(names(all_results), function(m) {
+  res = all_results[[m]]
+  out = extract_slope(res, which = "attested")
+  if (is.null(out)) return(NULL)
+  out$model = m
+  out
+})
+
+coef_table_novel = map_df(names(all_results), function(m) {
+  res = all_results[[m]]
+  out = extract_slope(res, which = "novel")
+  if (is.null(out)) return(NULL)
+  out$model = m
+  out
+})
+
+best_attested = coef_table_attested %>%
+  arrange(desc(estimate)) %>%
+  slice(1)
+
+best_novel = coef_table_novel %>%
+  arrange(desc(estimate)) %>%
+  slice(1)
+```
+
+
+
