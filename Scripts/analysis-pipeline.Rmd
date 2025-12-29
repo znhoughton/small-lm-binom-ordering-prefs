@@ -43,9 +43,9 @@ all_human_data_attested = all_human_data %>% filter(Attested == 1)
 options(contrasts = c("contr.sum","contr.sum"))
 
 corpus = read_csv('../Data/nonce_and_attested_binoms.csv')
-model_preds_data = read_csv("../Data/grid_search_data")
+model_preds_data = read_csv("../Data/grid_search_results.csv")
 all_model_preds = model_preds_data
-all_pythia_results = all_model_preds
+#all_model_preds = all_model_preds %>% filter(model %in% unique(all_model_preds$model)[1:2])
 
 ```
 
@@ -56,6 +56,8 @@ all_pythia_results = all_model_preds
 
 ```{r}
 
+item_base_fit  = NULL
+human_base_fit = NULL
 
 
 extract_slope = function(res, which = c("attested","novel")) {
@@ -116,31 +118,43 @@ fit_item_model = function(formula, data, backend, save_file=NULL) {
 
   if (backend == "brms") {
 
-    brm(
-      formula,
-      data   = data,
-      prior  = c(
-        prior(normal(0, 1), class = "Intercept"),
-        prior(student_t(3, 0, 1), class = "sd"),
-        prior(student_t(3, 0, 1), class = "sigma")
-      ),
-      iter   = 2000,
-      warmup = 1000,
-      chains = 4,
-      cores  = 4,
-      file   = save_file
-    )
+    if (is.null(item_base_fit)) {
+
+      message("Compiling ITEM model...")
+
+      item_base_fit <<- brm(
+        formula,
+        data   = data,
+        prior  = c(
+          prior(normal(0, 1), class = "Intercept"),
+          prior(student_t(3, 0, 1), class = "sd"),
+          prior(student_t(3, 0, 1), class = "sigma")
+        ),
+        iter   = 12000,
+        warmup = 6000,
+        chains = 4,
+        cores  = 4,
+        file   = save_file
+      )
+
+      return(item_base_fit)
+
+    } else {
+
+      message("Re-using compiled ITEM model via update()...")
+
+      return(update(
+        item_base_fit,
+        newdata = data,
+        file = save_file
+      ))
+    }
 
   } else if (backend == "lmer") {
-
-    lmer(
-      formula,
-      data = data,
-      REML = FALSE
-    )
-
+    lmer(formula, data=data, REML=FALSE)
   } else stop("backend must be 'brms' or 'lmer'")
 }
+
 
 
 # ----------------------------
@@ -150,18 +164,37 @@ fit_human_model = function(formula, data, backend, save_file=NULL) {
 
   if (backend == "brms") {
 
-    brm(
-      formula,
-      data      = data,
-      family    = bernoulli(),
-      prior     = prior(normal(0, 1), class="b"),
-      iter      = 6000,
-      warmup    = 3000,
-      chains    = 4,
-      cores     = 4,
-      save_pars = save_pars(all = TRUE),
-      file      = save_file
-    ) %>% add_criterion("loo")
+    if (is.null(human_base_fit)) {
+
+      message("Compiling HUMAN model...")
+
+      human_base_fit <<- brm(
+        formula,
+        data      = data,
+        family    = bernoulli(),
+        prior     = prior(normal(0, 1), class="b"),
+        iter      = 6000,
+        warmup    = 3000,
+        chains    = 4,
+        cores     = 4,
+        save_pars = save_pars(all = TRUE),
+        file      = save_file
+      ) #%>% add_criterion("loo")
+
+      return(human_base_fit)
+
+    } else {
+
+      message("Re-using compiled HUMAN model via update()...")
+
+      return(
+        update(
+          human_base_fit,
+          newdata = data,
+          file = save_file
+        ) #%>% add_criterion("loo")
+      )
+    }
 
   } else if (backend == "lmer") {
 
@@ -285,24 +318,30 @@ run_pythia_pipeline = function(
     extract_item_preds_backend(fit_item_attested, model_attested$Alpha, prefix, backend)
 
 
+  prefix = if (handcoded_flag) "pythia_handcoded" else "pythia_genpref"
+  slope_var = paste0("item_logodds_", prefix)
+  
   # ---------------------------
-  # JOIN TO HUMAN DATA
+  # JOIN TO HUMAN DATA + SCALE
   # ---------------------------
   human_novel =
     all_human_data_novel %>%
     semi_join(item_novel, by="Alpha") %>%
-    left_join(item_novel, by="Alpha")
-
+    left_join(item_novel, by="Alpha") %>%
+    mutate(
+      !!slope_var := as.numeric(scale(.data[[slope_var]]))
+    )
+  
   human_att =
     (if (handcoded_flag)
       all_human_data_attested %>% semi_join(test_df, by="Alpha")
     else
       all_human_data_attested %>% semi_join(item_att, by="Alpha")
     ) %>%
-    left_join(item_att, by="Alpha")
-
-
-  slope_var = paste0("item_logodds_", prefix)
+    left_join(item_att, by="Alpha") %>%
+    mutate(
+      !!slope_var := as.numeric(scale(.data[[slope_var]]))
+    )
 
   human_formula = as.formula(
   paste0("resp_binary ~ ",
@@ -342,12 +381,14 @@ model_list = all_model_preds %>%
   distinct(model) %>%
   pull(model)
 
+#model_list = model_list[1:289]
+
 make_stub = function(model_name) {
   clean = gsub("[^A-Za-z0-9]+", "_", model_name)
   file.path("../Data", clean)
 }
 
-backend_choice = "brms"   # or "lmer"
+backend_choice = "lmer"   # "lmer" or "brms"
 
 all_results = vector("list", length(model_list))
 names(all_results) = model_list
@@ -405,5 +446,683 @@ best_novel = coef_table_novel %>%
   slice(1)
 ```
 
+```{r}
+best_attested$model
+best_novel$model
+```
 
+## Confirm which hyperparameters had the most impact
+
+```{r}
+
+parse_number_vec <- function(x) {
+
+  x <- tolower(x)
+
+  # return NA where x is NA
+  out <- rep(NA_real_, length(x))
+
+  # plain numbers
+  plain <- grepl("^[0-9.]+$", x)
+  out[plain] <- as.numeric(x[plain])
+
+  # k suffix
+  k <- grepl("^[0-9.]+k$", x)
+  out[k] <- as.numeric(sub("k$", "", x[k])) * 1e3
+
+  # m suffix
+  m <- grepl("^[0-9.]+m$", x)
+  out[m] <- as.numeric(sub("m$", "", x[m])) * 1e6
+
+  out
+}
+
+df2 <- coef_table_attested %>%
+  mutate(
+    is_base = str_detect(model, "EleutherAI/pythia"),
+
+    # ---------------- METHOD TYPE ----------------
+    method = case_when(
+      is_base ~ "base",
+      str_detect(model, "genpref") ~ "genpref",
+      str_detect(model, "handcoded") ~ "handcoded",
+      TRUE ~ NA_character_
+    ),
+
+    # ---------------- DATASET TYPE ----------------
+    nunique = str_detect(model, "nunique"),
+
+    # ---------------- N BINOMS ----------------
+    n_binoms_raw = if_else(
+      is_base, NA_character_,
+      str_extract(model, "(?<=_)n[0-9a-zA-Z]+")
+    ) %>% str_remove("^n"),
+
+    n_binoms = if_else(
+      nunique, NA_real_,
+      parse_number_vec(n_binoms_raw)
+    ),
+
+    # ---------------- N NONBINOMS ----------------
+    n_nonbinoms_raw = if_else(
+      is_base, NA_character_,
+      str_extract(model, "(?<=_)nb[0-9a-zA-Z]+")
+    ) %>% str_remove("^nb"),
+
+    n_nonbinoms = parse_number_vec(n_nonbinoms_raw),
+
+    # ---------------- MODEL SIZE ----------------
+    model_size = case_when(
+      is_base ~ str_extract(model, "[0-9]+") %>% as.numeric(),
+      TRUE ~ str_extract(model, "(?<=_)\\d+(?=M)") %>% as.numeric()
+    ),
+
+    # ---------------- EPOCH ----------------
+    epoch = if_else(
+      is_base, NA_real_,
+      str_extract(model, "ep[0-9]+") %>%
+        str_remove("^ep") %>%
+        as.numeric()
+    ),
+
+    # ---------------- LEARNING RATE ----------------
+    lr = if_else(
+      is_base, NA_real_,
+      str_extract(model, "lr[0-9e.-]+") %>%
+        str_remove("^lr") %>%
+        as.numeric()
+    ),
+
+    # ---------------- SEED ----------------
+    seed = if_else(
+      is_base, NA_real_,
+      str_extract(model, "seed[0-9]+") %>%
+        str_remove("^seed") %>%
+        as.numeric()
+    )
+  )
+
+df2 <- df2 %>%
+  mutate(method = factor(method, levels=c("base","genpref","handcoded")))
+
+df2 <- df2 %>%
+  mutate(
+    n_binoms    = if_else(is.na(n_binoms),    0, n_binoms),
+    n_nonbinoms = if_else(is.na(n_nonbinoms), 0, n_nonbinoms)
+  )
+
+df2 <- df2 %>%
+  mutate(nunique = factor(nunique, levels=c(FALSE, TRUE)))
+
+
+
+df3 <- coef_table_novel %>%
+  mutate(
+    is_base = str_detect(model, "EleutherAI/pythia"),
+
+    # ---------------- METHOD TYPE ----------------
+    method = case_when(
+      is_base ~ "base",
+      str_detect(model, "genpref") ~ "genpref",
+      str_detect(model, "handcoded") ~ "handcoded",
+      TRUE ~ NA_character_
+    ),
+
+    # ---------------- DATASET TYPE ----------------
+    nunique = str_detect(model, "nunique"),
+
+    # ---------------- N BINOMS ----------------
+    n_binoms_raw = if_else(
+      is_base, NA_character_,
+      str_extract(model, "(?<=_)n[0-9a-zA-Z]+")
+    ) %>% str_remove("^n"),
+
+    n_binoms = if_else(
+      nunique, NA_real_,
+      parse_number_vec(n_binoms_raw)
+    ),
+
+    # ---------------- N NONBINOMS ----------------
+    n_nonbinoms_raw = if_else(
+      is_base, NA_character_,
+      str_extract(model, "(?<=_)nb[0-9a-zA-Z]+")
+    ) %>% str_remove("^nb"),
+
+    n_nonbinoms = parse_number_vec(n_nonbinoms_raw),
+
+    # ---------------- MODEL SIZE ----------------
+    model_size = case_when(
+      is_base ~ str_extract(model, "[0-9]+") %>% as.numeric(),
+      TRUE ~ str_extract(model, "(?<=_)\\d+(?=M)") %>% as.numeric()
+    ),
+
+    # ---------------- EPOCH ----------------
+    epoch = if_else(
+      is_base, NA_real_,
+      str_extract(model, "ep[0-9]+") %>%
+        str_remove("^ep") %>%
+        as.numeric()
+    ),
+
+    # ---------------- LEARNING RATE ----------------
+    lr = if_else(
+      is_base, NA_real_,
+      str_extract(model, "lr[0-9e.-]+") %>%
+        str_remove("^lr") %>%
+        as.numeric()
+    ),
+
+    # ---------------- SEED ----------------
+    seed = if_else(
+      is_base, NA_real_,
+      str_extract(model, "seed[0-9]+") %>%
+        str_remove("^seed") %>%
+        as.numeric()
+    )
+  )
+
+df3 <- df3 %>%
+  mutate(method = factor(method, levels=c("base","genpref","handcoded")))
+
+df3 <- df3 %>%
+  mutate(
+    n_binoms    = if_else(is.na(n_binoms),    0, n_binoms),
+    n_nonbinoms = if_else(is.na(n_nonbinoms), 0, n_nonbinoms)
+  )
+
+df3 <- df3 %>%
+  mutate(nunique = factor(nunique, levels=c(FALSE, TRUE)))
+
+
+
+ggplot(df2, aes(method, estimate, color = method)) +
+  geom_point(size=3, alpha=.8) +
+  stat_summary(fun=mean, geom="point", size=6, shape=18) +
+  theme_minimal() +
+  labs(title="Human Alignment (Estimate) by Model Type",
+       y="Estimate", x="Model Type")
+
+ggplot(df2, aes(n_binoms, estimate, color = method)) +
+  geom_point(size=3) +
+  geom_smooth(method="lm", se=FALSE) +
+  theme_minimal() +
+  labs(title="Effect of # Binomials on Estimate",
+       x="# Binomials", y="Estimate")
+
+
+
+ggplot(df2, aes(epoch, estimate, color = method)) +
+  geom_point(size=3) +
+  geom_smooth(method="lm", se=FALSE) +
+  theme_minimal() +
+  labs(title="Effect of Epochs on Estimate",
+       x="Epochs", y="Estimate")
+
+ggplot(df2, aes(nunique, estimate, color = method)) +
+  geom_point(position = position_jitter(width=.1), size=3) +
+  stat_summary(fun=mean, geom="point", size=6, shape=18) +
+  theme_minimal() +
+  labs(title="Effect of Training Uniqueness",
+       x="Training Type", y="Estimate")
+
+```
+
+## Confirm best model with brms model
+
+### Human Analysis
+
+#### GPT OSS 120B Coded Data
+
+```{r}
+# ==================================================
+# PYTHIA baseline → item preds → humans → LOO
+# (GenPref-OLD structure, Pythia data)
+# ==================================================
+best_base_model = 'EleutherAI/pythia-410m' #base model for best performing finetuning
+
+
+pythia_baseline_model_data = all_model_preds %>%
+  filter(model == best_base_model) %>%
+  mutate(log_odds = preference) %>%
+  separate(binom, c("Word1","and","Word2"), remove=FALSE, sep=" ") %>%
+  select(-and) %>%
+  left_join(corpus, by=c("Word1","Word2")) %>%
+  mutate(
+    y_vals =
+      0.02191943 + 0.23925834*Form +  0.24889543*Percept +
+      0.41836997*Culture + 0.25967334*Power +
+      0.01867604*Intense + 1.30365980*Icon +
+      0.08553552*Freq + 0.15241566*Len -
+      0.19381657*Lapse + 0.36019221*`*BStress`,
+    GenPref = plogis(y_vals) - 0.5,
+    RelFreq = RelFreq - 0.5
+  ) %>%
+  ungroup()
+
+
+pythia_baseline_model_data_attested = pythia_baseline_model_data %>%
+  ungroup() %>%
+  filter(Attested == 1) %>%
+  mutate(CenteredOverallFreq = as.numeric(scale(log(OverallFreq))))
+
+
+pythia_baseline_model_data_novel = pythia_baseline_model_data %>%
+  ungroup() %>%
+  filter(Attested == 0)
+
+pythia_baseline_model_data_attested$prompt = factor(pythia_baseline_model_data_attested$prompt)
+pythia_baseline_model_data_novel$prompt = factor(pythia_baseline_model_data_novel$prompt)
+
+pythia_baseline_model_data_novel = pythia_baseline_model_data_novel %>%
+  rename(no_final_stress = "*BStress")
+
+pythia_baseline_model_data_attested = pythia_baseline_model_data_attested %>%
+  rename(no_final_stress = "*BStress")
+# --------------------------------------------------
+# Split Pythia data into novel vs attested
+# --------------------------------------------------
+pythia_model_data_novel <-
+  pythia_baseline_model_data %>%
+  filter(Attested == 0)
+
+pythia_model_data_attested <-
+  pythia_baseline_model_data %>%
+  filter(Attested == 1)
+
+prior_probs = c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha"),
+  prior(student_t(3, 0, 1), class = "sd", group = "prompt"),
+  prior(student_t(3, 0, 1), class = "sigma")
+)
+
+
+
+# --------------------------------------------------
+# Item-level models (log_odds ~ 1 + REs)
+# --------------------------------------------------
+pythia_best_base_item_preds_novel = brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = pythia_model_data_novel,
+  prior  = prior_probs,
+  iter   = 18000,
+  warmup = 9000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/pythia_best_base_item_preds_novel"
+)
+
+pythia_best_base_item_preds_attested = brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = pythia_model_data_attested,
+  prior  = prior_probs,
+  iter   = 20000,
+  warmup = 10000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/pythia_best_base_item_preds_attested"
+)
+
+# --------------------------------------------------
+# Extract per-item predicted log-odds + CIs
+# --------------------------------------------------
+extract_item_preds_ci = function(fit, alphas, prefix) {
+  # Ensure we never trip factor-level mismatches
+  alphas_chr = unique(as.character(alphas))
+
+  newdata = data.frame(
+    Alpha  = alphas_chr,
+    prompt = NA_character_,
+    stringsAsFactors = FALSE
+  )
+
+  fit_mat = fitted(
+    fit,
+    newdata    = newdata,
+    re_formula = ~(1 | Alpha),   # only item RE
+    summary    = TRUE,
+    allow_new_levels = TRUE      # critical if any level mismatch remains
+  )
+
+  tibble(
+    Alpha = newdata$Alpha,
+    !!paste0("item_logodds_", prefix) := fit_mat[, "Estimate"],
+    !!paste0("item_lo_", prefix)      := fit_mat[, "Q2.5"],
+    !!paste0("item_hi_", prefix)      := fit_mat[, "Q97.5"]
+  )
+}
+
+
+item_df_pythia_novel <-
+  extract_item_preds_ci(
+    pythia_best_base_item_preds_novel,
+    pythia_model_data_novel$Alpha,
+    prefix = "pythia"
+  )
+
+item_df_pythia_attested <-
+  extract_item_preds_ci(
+    pythia_best_base_item_preds_attested,
+    pythia_model_data_attested$Alpha,
+    prefix = "pythia"
+  )
+
+# --------------------------------------------------
+# Join to human data
+# --------------------------------------------------
+human_data_novel_pythia <-
+  all_human_data_novel %>%
+  semi_join(item_df_pythia_novel, by = "Alpha") %>%
+  left_join(item_df_pythia_novel, by = "Alpha")
+
+human_data_attested_pythia <-
+  all_human_data_attested %>%
+  semi_join(item_df_pythia_attested, by = "Alpha") %>%
+  left_join(item_df_pythia_attested, by = "Alpha")
+
+# Safety checks
+stopifnot(!any(is.na(human_data_novel_pythia$item_logodds_pythia)))
+stopifnot(!any(is.na(human_data_attested_pythia$item_logodds_pythia)))
+
+# --------------------------------------------------
+# Priors for human-choice model
+# --------------------------------------------------
+prior_probs_pythia = c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b"),
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+
+# --------------------------------------------------
+# Human choice models (novel + attested)
+# --------------------------------------------------
+human_data_novel_best_base_pythia_model = brm(
+  resp_binary ~ scale(item_logodds_pythia) + (1 | participant) + (1 | Alpha),
+  data      = human_data_novel_pythia,
+  family    = bernoulli(link = "logit"),
+  prior     = prior_probs_pythia,
+  chains    = 4,
+  cores     = 4,
+  iter      = 6000,
+  warmup    = 3000,
+  save_pars = save_pars(all = TRUE),
+  file      = "../Data/human_data_novel_best_base_pythia_model"
+) %>% add_criterion("loo")
+
+human_data_attested_best_base_pythia_model = brm(
+  resp_binary ~ scale(item_logodds_pythia) + (1 | participant) + (1 | Alpha),
+  data      = human_data_attested_pythia,
+  family    = bernoulli(link = "logit"),
+  prior     = prior_probs_pythia,
+  chains    = 4,
+  cores     = 4,
+  iter      = 6000,
+  warmup    = 3000,
+  save_pars = save_pars(all = TRUE),
+  file      = "../Data/human_data_attested_best_base_pythia_model"
+) %>% add_criterion("loo")
+
+
+
+```
+
+#### Attested for handcoded comparison
+
+```{r}
+
+handcoded_base_attested = pythia_baseline_model_data %>% filter(Alpha %in% test_df$Alpha)
+
+fit_item_model <- function(df, file_stub,
+                           iter, warmup) {
+
+  brm(
+    log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+    data   = df,
+    prior  = prior_probs,
+    iter   = iter,
+    warmup = warmup,
+    chains = 4,
+    cores  = 4,
+    file   = file_stub
+  )
+}
+
+fit_base_hand_attested = fit_item_model(
+  handcoded_base_attested,
+  file_stub = "../Data/handcoded_item_preds_pythia_best_base_attested",
+  iter = 26000,
+  warmup = 13000
+)
+
+extract_item_preds <- function(fit, alphas) {
+
+  newdata <- data.frame(
+    Alpha  = unique(alphas),
+    prompt = NA
+  )
+
+  fitted(
+    fit,
+    newdata    = newdata,
+    re_formula = ~(1 | Alpha),
+    summary    = TRUE
+  )[,"Estimate"] %>%
+    setNames(newdata$Alpha) %>%
+    tibble::enframe(
+      name  = "Alpha",
+      value = "item_logodds_hand"
+    )
+}
+
+
+item_df_hand_base_attested <-
+  extract_item_preds(fit_base_hand_attested,
+                     handcoded_base_attested$Alpha)
+
+human_data_attested_hand_base <-
+  all_human_data_attested %>%
+  semi_join(test_df, by = "Alpha") %>%
+  left_join(item_df_hand_base_attested, by = "Alpha")
+
+prior_probs_hand <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b"),
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+
+human_data_attested_hand_base_model = brm(
+  resp_binary ~ scale(item_logodds_hand) + (1 | participant) + (1 | Alpha),
+  data   = human_data_attested_hand_base,
+  family = bernoulli(),
+  prior  = prior_probs_hand,
+  iter   = 6000,
+  warmup = 3000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/human_data_best_base_attested_hand"
+) %>% add_criterion("loo")
+
+
+```
+
+### Confirm best finetuned model
+
+```{r}
+best_genpref_model = 'qing-yao/handcoded_n1000_nb150k_410M_ep1_lr1e-4_seed42' #base model for best performing finetuning
+
+pythia_genpref_model_data = all_model_preds %>%
+    filter(model == best_genpref_model) %>%
+    mutate(log_odds = preference) %>%
+    separate(binom, c("Word1","and","Word2"), remove=FALSE, sep=" ") %>%
+    select(-and) %>%
+    left_join(corpus, by=c("Word1","Word2")) %>%
+    mutate(
+      y_vals =
+        0.02191943 + 0.23925834*Form +  0.24889543*Percept +
+        0.41836997*Culture + 0.25967334*Power +
+        0.01867604*Intense + 1.30365980*Icon +
+        0.08553552*Freq + 0.15241566*Len -
+        0.19381657*Lapse + 0.36019221*`*BStress`,
+      GenPref = plogis(y_vals) - 0.5,
+      RelFreq = RelFreq - 0.5
+    ) %>%
+    ungroup()
+
+
+pythia_genpref_model_data_attested = pythia_genpref_model_data %>%
+  ungroup() %>%
+  filter(Attested == 1) %>%
+  mutate(CenteredOverallFreq = as.numeric(scale(log(OverallFreq))))
+
+
+pythia_genpref_model_data_novel = pythia_genpref_model_data %>%
+  ungroup() %>%
+  filter(Attested == 0)
+
+prior_probs = c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha"),
+  prior(student_t(3, 0, 1), class = "sd", group = "prompt"),
+  prior(student_t(3, 0, 1), class = "sigma")
+)
+
+# --------------------------------------------------
+# Item-level models (GENPREF)
+# --------------------------------------------------
+pythia_best_genpref_item_preds_novel = brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = pythia_genpref_model_data_novel,
+  prior  = prior_probs,
+  iter   = 18000,
+  warmup = 9000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/pythia_best_genpref_item_preds_novel"
+)
+
+pythia_best_genpref_item_preds_attested = brm(
+  log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
+  data   = pythia_genpref_model_data_attested,
+  prior  = prior_probs,
+  iter   = 20000,
+  warmup = 10000,
+  chains = 4,
+  cores  = 4,
+  file   = "../Data/pythia_best_genpref_item_preds_attested"
+)
+
+# --------------------------------------------------
+# Extract per-item predicted log-odds + CIs
+# --------------------------------------------------
+
+extract_item_preds_ci = function(fit, alphas, prefix) {
+  # Ensure we never trip factor-level mismatches
+  alphas_chr = unique(as.character(alphas))
+
+  newdata = data.frame(
+    Alpha  = alphas_chr,
+    prompt = NA_character_,
+    stringsAsFactors = FALSE
+  )
+
+  fit_mat = fitted(
+    fit,
+    newdata    = newdata,
+    re_formula = ~(1 | Alpha),   # only item RE
+    summary    = TRUE,
+    allow_new_levels = TRUE      # critical if any level mismatch remains
+  )
+
+  tibble(
+    Alpha = newdata$Alpha,
+    !!paste0("item_logodds_", prefix) := fit_mat[, "Estimate"],
+    !!paste0("item_lo_", prefix)      := fit_mat[, "Q2.5"],
+    !!paste0("item_hi_", prefix)      := fit_mat[, "Q97.5"]
+  )
+}
+
+item_df_pythia_genpref_novel <-
+  extract_item_preds_ci(
+    pythia_best_genpref_item_preds_novel,
+    pythia_genpref_model_data_novel$Alpha,
+    prefix = "pythia_genpref"
+  )
+
+item_df_pythia_genpref_attested <-
+  extract_item_preds_ci(
+    pythia_best_genpref_item_preds_attested,
+    pythia_genpref_model_data_attested$Alpha,
+    prefix = "pythia_genpref"
+  )
+
+# --------------------------------------------------
+# Join to human data
+# --------------------------------------------------
+human_data_novel_pythia_genpref <-
+  all_human_data_novel %>%
+  semi_join(item_df_pythia_genpref_novel, by = "Alpha") %>%
+  left_join(item_df_pythia_genpref_novel, by = "Alpha")
+
+human_data_attested_pythia_genpref <-
+  all_human_data_attested %>%
+  semi_join(item_df_pythia_genpref_attested, by = "Alpha") %>%
+  left_join(item_df_pythia_genpref_attested, by = "Alpha")
+
+# Safety checks
+stopifnot(!any(is.na(human_data_novel_pythia_genpref$item_logodds_pythia_genpref)))
+stopifnot(!any(is.na(human_data_attested_pythia_genpref$item_logodds_pythia_genpref)))
+
+# --------------------------------------------------
+# Priors for human-choice model
+# --------------------------------------------------
+prior_probs_pythia_genpref = c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b"),
+  prior(student_t(3, 0, 1), class = "sd", group = "participant"),
+  prior(student_t(3, 0, 1), class = "sd", group = "Alpha")
+)
+
+# --------------------------------------------------
+# Human choice models (GENPREF: novel + attested)
+# --------------------------------------------------
+human_data_novel_best_pythia_genpref_model = brm(
+  resp_binary ~ scale(item_logodds_pythia_genpref) + (1 | participant) + (1 | Alpha),
+  data      = human_data_novel_pythia_genpref,
+  family    = bernoulli(link = "logit"),
+  prior     = prior_probs_pythia_genpref,
+  chains    = 4,
+  cores     = 4,
+  iter      = 6000,
+  warmup    = 3000,
+  save_pars = save_pars(all = TRUE),
+  file      = "../Data/human_data_novel_best_pythia_genpref_model"
+) %>% add_criterion("loo")
+
+human_data_attested_best_pythia_genpref_model = brm(
+  resp_binary ~ scale(item_logodds_pythia_genpref) + (1 | participant) + (1 | Alpha),
+  data      = human_data_attested_pythia_genpref,
+  family    = bernoulli(link = "logit"),
+  prior     = prior_probs_pythia_genpref,
+  chains    = 4,
+  cores     = 4,
+  iter      = 6000,
+  warmup    = 3000,
+  save_pars = save_pars(all = TRUE),
+  file      = "../Data/human_data_attested_best_pythia_genpref_model"
+) %>% add_criterion("loo")
+
+
+# loo_compare(
+#   human_data_novel_pythia_genpref_model,
+#   human_data_novel_pythia_model
+# )
+# 
+# loo_compare(
+#   human_data_attested_pythia_genpref_model,
+#   human_data_attested_pythia_model
+# )
+
+```
 
