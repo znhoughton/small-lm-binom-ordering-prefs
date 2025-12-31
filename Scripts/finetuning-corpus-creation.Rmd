@@ -27,7 +27,7 @@ udmodel = udpipe_load_model(udmodel$file_model)
 
 
 selected_binoms = all_binoms %>%
-  slice_sample(n = 10000, replace = F) 
+  slice_sample(n = 1000000, replace = F) 
 
 binoms_filtered = selected_binoms %>%
   anti_join(binoms_in_human_exp, by = c("WordA", "WordB"))
@@ -75,9 +75,9 @@ binoms_filtered <- binoms_filtered %>%
 
 
 binoms_filtered = binoms_filtered %>%
-  filter(worda_pos == 'NOUN' & wordb_pos == 'NOUN') %>%
+  filter(worda_pos == 'NOUN' & wordb_pos == 'NOUN') #%>%
   #filter(TotalFreq > 41) %>%
-  slice_sample(n = 5000)
+  #slice_sample(n = 5000)
 
 # syllable count = number of vowels with stress digit
 count_syllables <- function(cmu_string) {
@@ -96,13 +96,14 @@ compute_bstress <- function(cmuA, cmuB) {
   sA <- final_stress(cmuA)
   sB <- final_stress(cmuB)
 
-  is_stressA <- sA > 0
-  is_stressB <- sB > 0
+  # If either word has no vowel stress info, return NA
+  if (is.na(sA) || is.na(sB)) return(NA_integer_)
 
-  if (is_stressA && !is_stressB) return(1L)
-  if (!is_stressA && is_stressB) return(-1L)
+  if (sA > 0 && sB <= 0) return(1L)
+  if (sA <= 0 && sB > 0) return(-1L)
   0L
 }
+
 
 # Extract stress pattern: vector of 0/1/2 per vowel
 stress_pattern <- function(cmu_string) {
@@ -162,10 +163,13 @@ binoms_filtered <- binoms_filtered %>%
 
 
 binoms_filtered = binoms_filtered %>%
-  mutate(RelFreq = AlphaOrderFreq / TotalFreq,
-         OverallFreq = log(TotalFreq))
+  mutate(RelFreq = AlphaOrderFreq / TotalFreq)
 
-#write_csv(binoms_filtered, "../Data/fintetuning-binoms-without-constraints-coded.csv")
+nrow(binoms_filtered)
+
+binoms_filtered = binoms_filtered %>%
+  filter(WordA != WordB)
+#write_csv(binoms_filtered, "../Data/fintetuning-all-binoms-without-constraints-coded.csv")
 
 binoms_with_genpref = read_csv('../Data/binomials_coded.csv') %>%
   mutate(Freq = log(WordA_Unigram) - log(WordB_Unigram),

@@ -149,12 +149,23 @@ def main():
         for modelsize in modelsizes
         for epoch in epochs
     ]
+    #genpref_nunique_nb0_babylm_ep1_lr1e-4_seed42
+    #{genpref, handcoded}; {nb0, nb50k}; {ep1, ep5}
+    types = ["genpref", "handcoded"]
+    nonbinoms = ["nb0", "nb50k"]
+    epochs = ["ep1", "ep5"]
+    baby_lm_names = [f"qing-yao/{type}_nunique_{nonbinom}_babylm_{epoch}_lr1e-4_seed42" for type in types for nonbinom in nonbinoms for epoch in epochs]
 
-    
+
     model_names.extend([
         "EleutherAI/pythia-70m",
         "EleutherAI/pythia-160m",
         "EleutherAI/pythia-410m"
+    ])
+
+    model_names.extend(baby_lm_names)
+    model_names.extend([
+        "qing-yao/binomial-babylm-base_seed-42_1e-3"
     ])
 
     model_names.extend(model_names_base)

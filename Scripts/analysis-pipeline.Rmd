@@ -146,6 +146,8 @@ fit_item_model = function(formula, data, backend, save_file=NULL) {
       return(update(
         item_base_fit,
         newdata = data,
+        cores = 4,
+        chains = 4,
         file = save_file
       ))
     }
@@ -191,7 +193,9 @@ fit_human_model = function(formula, data, backend, save_file=NULL) {
         update(
           human_base_fit,
           newdata = data,
-          file = save_file
+          file = save_file,
+          cores = 4,
+          chains = 4
         ) #%>% add_criterion("loo")
       )
     }
@@ -264,12 +268,13 @@ run_pythia_pipeline = function(
   all_human_data_attested,
   test_df,
   save_stub,
-  backend = "brms"
+  backend = "brms",
+  force_handcoded = FALSE   # 👈 ADD THIS
 ) {
 
   message("Running pipeline for: ", model_name)
 
-  handcoded_flag = is_handcoded(model_name)
+  handcoded_flag = force_handcoded || is_handcoded(model_name)
 
   model_df =
     all_model_preds %>%
@@ -322,14 +327,14 @@ run_pythia_pipeline = function(
   slope_var = paste0("item_logodds_", prefix)
   
   # ---------------------------
-  # JOIN TO HUMAN DATA + SCALE
+  # JOIN TO HUMAN DATA
   # ---------------------------
   human_novel =
     all_human_data_novel %>%
     semi_join(item_novel, by="Alpha") %>%
     left_join(item_novel, by="Alpha") %>%
     mutate(
-      !!slope_var := as.numeric(scale(.data[[slope_var]]))
+      !!slope_var := as.numeric(.data[[slope_var]])
     )
   
   human_att =
@@ -340,7 +345,7 @@ run_pythia_pipeline = function(
     ) %>%
     left_join(item_att, by="Alpha") %>%
     mutate(
-      !!slope_var := as.numeric(scale(.data[[slope_var]]))
+      !!slope_var := as.numeric(.data[[slope_var]])
     )
 
   human_formula = as.formula(
@@ -377,6 +382,7 @@ run_pythia_pipeline = function(
 
 
 ```{r}
+
 model_list = all_model_preds %>%
   distinct(model) %>%
   pull(model)
@@ -421,6 +427,42 @@ for (m in model_list) {
 }
 
 
+baseline_models <- c(
+  "EleutherAI/pythia-70m",
+  "EleutherAI/pythia-160m",
+  "EleutherAI/pythia-410m"
+)
+
+for (m in baseline_models) {
+
+  message("===============")
+  message(" BASELINE (handcoded subset): ", m)
+  message("===============")
+
+  stub_hc <- paste0(make_stub(m), "_handcoded_subset")
+
+  all_results[[paste0(m, "__handcoded")]] <-
+    tryCatch(
+      run_pythia_pipeline(
+        model_name = m,
+        all_model_preds = all_model_preds,
+        corpus = corpus,
+        all_human_data_novel = all_human_data_novel,
+        all_human_data_attested = all_human_data_attested,
+        test_df = test_df,
+        save_stub = stub_hc,
+        backend = backend_choice,
+        force_handcoded = TRUE     # 👈 THIS IS THE ONLY DIFFERENCE
+      ),
+      error = function(e) {
+        message("❌ ERROR in baseline handcoded ", m, ": ", e$message)
+        list(error = TRUE)
+      }
+    )
+}
+
+
+
 coef_table_attested = map_df(names(all_results), function(m) {
   res = all_results[[m]]
   out = extract_slope(res, which = "attested")
@@ -437,6 +479,9 @@ coef_table_novel = map_df(names(all_results), function(m) {
   out
 })
 
+
+
+
 best_attested = coef_table_attested %>%
   arrange(desc(estimate)) %>%
   slice(1)
@@ -444,12 +489,195 @@ best_attested = coef_table_attested %>%
 best_novel = coef_table_novel %>%
   arrange(desc(estimate)) %>%
   slice(1)
+
+write_csv(coef_table_attested, '../Data/coef_table_attested_lmer.csv')
+write_csv(coef_table_novel, '../Data/coef_table_novel_lmer.csv')
+
+
 ```
 
 ```{r}
-best_attested$model
-best_novel$model
+library(tidyverse)
+
+coef_aug_att <- coef_table_attested %>%
+  mutate(
+    # MODEL SIZE from either prefix or anywhere in name
+    model_size = case_when(
+      str_detect(model, regex("70m",  ignore_case=TRUE))  ~ "70m",
+      str_detect(model, regex("160m", ignore_case=TRUE)) ~ "160m",
+      str_detect(model, regex("410m", ignore_case=TRUE)) ~ "410m",
+      TRUE ~ NA_character_
+    ),
+
+    # HANDCODED FLAG — ANY mention of "handcoded"
+    handcoded_flag =
+      str_detect(model, regex("handcoded", ignore_case=TRUE)) |
+      str_detect(model, "__handcoded$")
+  )
+
+
+baseline_rows_att <- coef_aug_att %>%
+  filter(str_detect(model, "^EleutherAI/pythia")) %>%
+  select(model_size, handcoded_flag,
+         baseline_estimate = estimate)
+
+coef_with_improvement_att <- coef_aug_att %>%
+  left_join(
+    baseline_rows_att,
+    by = c("model_size", "handcoded_flag")
+  ) %>%
+  mutate(
+    improvement = estimate - baseline_estimate
+  )
+
+
+coef_aug_novel <- coef_table_novel %>%
+  mutate(
+    model_size = case_when(
+      str_detect(model, regex("70m",  ignore_case=TRUE))  ~ "70m",
+      str_detect(model, regex("160m", ignore_case=TRUE)) ~ "160m",
+      str_detect(model, regex("410m", ignore_case=TRUE)) ~ "410m",
+      TRUE ~ NA_character_
+    ),
+    handcoded_flag =
+      str_detect(model, regex("handcoded", ignore_case=TRUE)) |
+      str_detect(model, "__handcoded$")
+  )
+
+
+baseline_rows_novel <- coef_aug_novel %>%
+  filter(str_detect(model, "^EleutherAI/pythia"),
+         handcoded_flag == FALSE) %>%   # << key change
+  select(model_size,
+         baseline_estimate = estimate)
+
+
+coef_with_improvement_novel <- coef_aug_novel %>%
+  left_join(
+    baseline_rows_novel,
+    by = c("model_size")
+  ) %>%
+  mutate(
+    improvement = estimate - baseline_estimate
+  )
+
+
+
 ```
+
+```{r}
+coef_with_improvement_att = coef_with_improvement_att %>%
+  mutate(tmp = str_split(model, "[/_]")) %>%
+  unnest_wider(tmp, names_sep = "_")
+
+coef_with_improvement_novel = coef_with_improvement_novel %>%
+  mutate(tmp = str_split(model, "[/_]")) %>%
+  unnest_wider(tmp, names_sep = "_")
+
+```
+
+## baby LM 
+
+```{r}
+
+model_list_baby_lms = all_model_preds %>%
+  filter(str_detect(model, "babylm")) %>%
+  distinct(model) %>%
+  pull(model)
+
+#model_list = model_list[1:289]
+
+make_stub = function(model_name) {
+  clean = gsub("[^A-Za-z0-9]+", "_", model_name)
+  file.path("../Data", clean)
+}
+
+backend_choice = "lmer"   # "lmer" or "brms"
+
+all_results_babylm = vector("list", length(model_list_baby_lms))
+names(all_results_babylm) = model_list_baby_lms
+
+for (m in model_list_baby_lms) {
+
+  message("--------------")
+  message(" Running: ", m)
+  message("--------------")
+
+  stub = make_stub(m)
+
+  all_results_babylm[[m]] =
+    tryCatch(
+      run_pythia_pipeline(
+        model_name = m,
+        all_model_preds = all_model_preds,
+        corpus = corpus,
+        all_human_data_novel = all_human_data_novel,
+        all_human_data_attested = all_human_data_attested,
+        test_df = test_df,
+        save_stub = stub,
+        backend = backend_choice
+      ),
+      error = function(e) {
+        message("❌ ERROR in ", m, ": ", e$message)
+        list(error = TRUE)
+      }
+    )
+}
+
+
+baseline_models <- c(
+  "qing-yao/binomial-babylm-base_seed-42_1e-3"
+)
+
+for (m in baseline_models) {
+
+  message("===============")
+  message(" BASELINE (handcoded subset): ", m)
+  message("===============")
+
+  stub_hc <- paste0(make_stub(m), "_handcoded_subset")
+
+  all_results_babylm[[paste0(m, "__handcoded")]] <-
+    tryCatch(
+      run_pythia_pipeline(
+        model_name = m,
+        all_model_preds = all_model_preds,
+        corpus = corpus,
+        all_human_data_novel = all_human_data_novel,
+        all_human_data_attested = all_human_data_attested,
+        test_df = test_df,
+        save_stub = stub_hc,
+        backend = backend_choice,
+        force_handcoded = TRUE     # 👈 THIS IS THE ONLY DIFFERENCE
+      ),
+      error = function(e) {
+        message("❌ ERROR in baseline handcoded ", m, ": ", e$message)
+        list(error = TRUE)
+      }
+    )
+}
+
+
+
+coef_table_attested_babylm = map_df(names(all_results_babylm), function(m) {
+  res = all_results_babylm[[m]]
+  out = extract_slope(res, which = "attested")
+  if (is.null(out)) return(NULL)
+  out$model = m
+  out
+})
+
+coef_table_novel_babylm = map_df(names(all_results_babylm), function(m) {
+  res = all_results_babylm[[m]]
+  out = extract_slope(res, which = "novel")
+  if (is.null(out)) return(NULL)
+  out$model = m
+  out
+})
+
+```
+
+
 
 ## Confirm which hyperparameters had the most impact
 
@@ -838,7 +1066,7 @@ prior_probs_pythia = c(
 # Human choice models (novel + attested)
 # --------------------------------------------------
 human_data_novel_best_base_pythia_model = brm(
-  resp_binary ~ scale(item_logodds_pythia) + (1 | participant) + (1 | Alpha),
+  resp_binary ~ item_logodds_pythia + (1 | participant) + (1 | Alpha),
   data      = human_data_novel_pythia,
   family    = bernoulli(link = "logit"),
   prior     = prior_probs_pythia,
@@ -851,7 +1079,7 @@ human_data_novel_best_base_pythia_model = brm(
 ) %>% add_criterion("loo")
 
 human_data_attested_best_base_pythia_model = brm(
-  resp_binary ~ scale(item_logodds_pythia) + (1 | participant) + (1 | Alpha),
+  resp_binary ~ item_logodds_pythia + (1 | participant) + (1 | Alpha),
   data      = human_data_attested_pythia,
   family    = bernoulli(link = "logit"),
   prior     = prior_probs_pythia,
@@ -933,7 +1161,7 @@ prior_probs_hand <- c(
 )
 
 human_data_attested_hand_base_model = brm(
-  resp_binary ~ scale(item_logodds_hand) + (1 | participant) + (1 | Alpha),
+  resp_binary ~ item_logodds_hand + (1 | participant) + (1 | Alpha),
   data   = human_data_attested_hand_base,
   family = bernoulli(),
   prior  = prior_probs_hand,
@@ -950,6 +1178,7 @@ human_data_attested_hand_base_model = brm(
 ### Confirm best finetuned model
 
 ```{r}
+
 best_genpref_model = 'qing-yao/handcoded_n1000_nb150k_410M_ep1_lr1e-4_seed42' #base model for best performing finetuning
 
 pythia_genpref_model_data = all_model_preds %>%
@@ -974,6 +1203,7 @@ pythia_genpref_model_data = all_model_preds %>%
 pythia_genpref_model_data_attested = pythia_genpref_model_data %>%
   ungroup() %>%
   filter(Attested == 1) %>%
+  filter(Alpha %in% test_df$Alpha) %>%
   mutate(CenteredOverallFreq = as.numeric(scale(log(OverallFreq))))
 
 
@@ -1088,7 +1318,7 @@ prior_probs_pythia_genpref = c(
 # Human choice models (GENPREF: novel + attested)
 # --------------------------------------------------
 human_data_novel_best_pythia_genpref_model = brm(
-  resp_binary ~ scale(item_logodds_pythia_genpref) + (1 | participant) + (1 | Alpha),
+  resp_binary ~ item_logodds_pythia_genpref + (1 | participant) + (1 | Alpha),
   data      = human_data_novel_pythia_genpref,
   family    = bernoulli(link = "logit"),
   prior     = prior_probs_pythia_genpref,
@@ -1101,7 +1331,7 @@ human_data_novel_best_pythia_genpref_model = brm(
 ) %>% add_criterion("loo")
 
 human_data_attested_best_pythia_genpref_model = brm(
-  resp_binary ~ scale(item_logodds_pythia_genpref) + (1 | participant) + (1 | Alpha),
+  resp_binary ~ item_logodds_pythia_genpref + (1 | participant) + (1 | Alpha),
   data      = human_data_attested_pythia_genpref,
   family    = bernoulli(link = "logit"),
   prior     = prior_probs_pythia_genpref,
@@ -1114,15 +1344,108 @@ human_data_attested_best_pythia_genpref_model = brm(
 ) %>% add_criterion("loo")
 
 
-# loo_compare(
-#   human_data_novel_pythia_genpref_model,
-#   human_data_novel_pythia_model
-# )
-# 
-# loo_compare(
-#   human_data_attested_pythia_genpref_model,
-#   human_data_attested_pythia_model
-# )
+loo_compare(
+  human_data_novel_best_pythia_genpref_model,
+  human_data_novel_best_base_pythia_model
+)
+
+loo_compare(
+  human_data_attested_best_pythia_genpref_model,
+  human_data_attested_hand_base_model
+)
 
 ```
+## BabyLM model comparisons
+
+```{r}
+#best babylm model: qing-yao/handcoded_nunique_nb50k_babylm_ep5_lr1e-4_seed42
+
+res_handcoded <- run_pythia_pipeline(
+  model_name = "qing-yao/handcoded_nunique_nb50k_babylm_ep5_lr1e-4_seed42",
+  all_model_preds,
+  corpus,
+  all_human_data_novel,
+  all_human_data_attested,
+  test_df,
+  save_stub = "../Data/babylm_finetuned_best",
+  backend = "brms",
+  force_handcoded = TRUE     # 👉 forces Alpha subset = test_df
+)
+
+res_genpref <- run_pythia_pipeline(
+  model_name = "qing-yao/binomial-babylm-base_seed-42_1e-3",
+  all_model_preds,
+  corpus,
+  all_human_data_novel,
+  all_human_data_attested,
+  test_df,
+  save_stub = "../Data/babylm_base",
+  backend = "brms",
+  force_handcoded = TRUE     # 👉 IMPORTANT: same constraint here
+)
+
+
+library(dplyr)
+
+human_data_novel_joint <-
+  all_human_data_novel %>%
+  semi_join(res_handcoded$item_novel, by="Alpha") %>%
+  semi_join(res_genpref$item_novel, by="Alpha") %>%
+  left_join(res_handcoded$item_novel, by="Alpha") %>%
+  left_join(res_genpref$item_novel, by="Alpha") %>%
+  mutate(
+    z_pythia_handcoded =
+      scale(item_logodds_pythia_handcoded)[,1],
+    z_pythia_genpref =
+      scale(item_logodds_pythia_genpref)[,1]
+  )
+
+human_data_attested_joint <-
+  all_human_data_attested %>%
+  semi_join(res_handcoded$item_attested, by="Alpha") %>%
+  semi_join(res_genpref$item_attested, by="Alpha") %>%
+  left_join(res_handcoded$item_attested, by="Alpha") %>%
+  left_join(res_genpref$item_attested, by="Alpha") %>%
+  mutate(
+    z_pythia_handcoded =
+      scale(item_logodds_pythia_handcoded)[,1],
+    z_pythia_genpref =
+      scale(item_logodds_pythia_genpref)[,1]
+  )
+
+prior_joint <- c(
+  prior(normal(0,1), class="Intercept"),
+  prior(normal(0,1), class="b")
+)
+
+human_data_novel_joint_model <- brm(
+  resp_binary ~ z_pythia_handcoded + z_pythia_genpref +
+    (1 | participant) + (1 | Alpha),
+  data = human_data_novel_joint,
+  family = bernoulli(),
+  prior = prior_joint,
+  chains = 4, cores = 4,
+  iter = 6000, warmup = 3000,
+  save_pars = save_pars(all = TRUE),
+  file = "../Data/human_data_novel_joint_model"
+)
+
+human_data_attested_joint_model <- brm(
+  resp_binary ~ z_pythia_handcoded + z_pythia_genpref +
+    (1 | participant) + (1 | Alpha),
+  data = human_data_attested_joint,
+  family = bernoulli(),
+  prior = prior_joint,
+  chains = 4, cores = 4,
+  iter = 6000, warmup = 3000,
+  save_pars = save_pars(all = TRUE),
+  file = "../Data/human_data_attested_joint_model"
+)
+
+fixef(human_data_novel_joint_model)
+fixef(human_data_attested_joint_model)
+
+
+```
+
 
