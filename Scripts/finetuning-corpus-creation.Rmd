@@ -459,6 +459,75 @@ write_csv(simulated_data, '../Data/hand-coded-data-sampled-without-sentences.csv
 
 ```
 
+```{r}
+all_binoms_data = read_csv('../Data/all-binoms-data-sampled-without-sentences.csv')
+
+all_binoms_data = all_binoms_data %>%
+  ungroup() %>%
+  mutate(RelFreq = AlphaOrderFreq / TotalFreq,
+         OverallFreq = TotalFreq,
+         binom_prob = TotalFreq / sum(TotalFreq))
+
+all_binoms_data = all_binoms_data %>%
+  mutate(Freq = log(WordA_Unigram) - log(WordB_Unigram),
+         Len = Length,
+         '*BStress' = BStress) %>%
+  mutate(Alpha = paste0(WordA, " and ", WordB))
+
+
+all_binoms_data = all_binoms_data %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form + 0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(LogCenteredOverallFreq = as.numeric(scale(log(OverallFreq)))) %>%
+  mutate(
+    GenPref = GenPref - 0.5,
+    RelFreq = RelFreq - 0.5
+  ) %>%
+  filter(WordA != WordB)
+
+
+m1 = brm(
+  resp ~ GenPref + RelFreq + LogCenteredOverallFreq + GenPref:LogCenteredOverallFreq + RelFreq:LogCenteredOverallFreq + (GenPref + RelFreq + LogCenteredOverallFreq + GenPref:LogCenteredOverallFreq + RelFreq:LogCenteredOverallFreq | participant) + (1 | Item),
+  data = human_data,
+  family = bernoulli(link = "logit"),
+  chains = 4,   
+  cores = 4,
+  iter = 20000,  
+  warmup = 10000,
+  prior = prior_probs,
+  control = list(adapt_delta=0.99, max_treedepth = 20),
+  file = '../Data/human_data_model_results'
+)
+
+
+#predict human preference with finetuning corpus
+
+pred_summ = fitted(
+  m1,
+  newdata    = all_binoms_data,
+  re_formula = NA,   # again, population-level
+  summary    = TRUE,
+  ndraws = 1000
+)
+
+# This gives:
+#   Estimate   Est.Error     Q2.5    Q97.5
+# on the response scale (probabilities, because family = bernoulli)
+all_binoms_with_model_preds = cbind(all_binoms_data, pred_summ) %>%
+  na.omit() %>%
+  mutate(item = row_number()) %>%
+  mutate(predicted_resp_value = rbinom(n(), size = 1, prob = Estimate)) %>%
+  mutate(predicted_resp = case_when(
+    predicted_resp_value == 1 ~ paste0(WordA, ' and ', WordB),
+    predicted_resp_value == 0 ~ paste0(WordB, ' and ', WordA)
+  ))
+
+write_csv(all_binoms_with_model_preds, '../Data/all_binoms_with_model_preds.csv')
+
+```
+
+
+
 # Create RELFREQ
 
 ```{r}

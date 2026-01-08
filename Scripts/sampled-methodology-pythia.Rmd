@@ -574,6 +574,8 @@ loo_compare(
   human_data_attested_pythia_model
 )
 
+fixef(human_data_novel_pythia_genpref_model)
+fixef(human_data_attested_pythia_genpref_model)
 
 ```
 ### 5 epochs
@@ -728,6 +730,9 @@ loo_compare(
   human_data_attested_pythia_model
 )
 
+fixef(human_data_novel_pythia_genpref_model_5ep)
+fixef(human_data_attested_pythia_genpref_model_5ep)
+
 ```
 ### 10 epoch
 
@@ -799,9 +804,9 @@ pythia_genpref_item_preds_novel_10ep <- brm(
   file   = "../Data/pythia_genpref_item_preds_novel_sampled_10ep"
 )
 
-pythia_genpref_item_preds_attested_5ep <- brm(
+pythia_genpref_item_preds_attested_10ep <- brm(
   log_odds ~ 1 + (1 | Alpha) + (1 | prompt),
-  data   = pythia_genpref_attested_5ep,
+  data   = pythia_genpref_attested_10ep,
   prior  = prior_probs,
   iter   = 20000,
   warmup = 10000,
@@ -880,6 +885,10 @@ loo_compare(
   human_data_attested_pythia_genpref_model_10ep,
   human_data_attested_pythia_model
 )
+
+
+fixef(human_data_novel_pythia_genpref_model_10ep)
+fixef(human_data_attested_pythia_genpref_model_10ep)
 
 ```
 
