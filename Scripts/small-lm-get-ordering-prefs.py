@@ -45,14 +45,22 @@ def get_model_prefs(prompt, model_name, tokenizer, model):
     binomial_alpha = df['AandB'].tolist()
     binomial_nonalpha = df['BandA'].tolist()
 
-    seqs_alpha = np.array_split(binomial_alpha, 5)
+    seqs_alpha = np.array_split(binomial_alpha, 40)
     alpha_scores = []
-    for batch in seqs_alpha:
+    for batch in tqdm(
+        seqs_alpha,
+        desc="  alpha batches",
+        leave=False
+    ):
         alpha_scores.extend(to_tokens_and_logprobs(model, tokenizer, batch.tolist()))
 
-    seqs_nonalpha = np.array_split(binomial_nonalpha, 5)
+    seqs_nonalpha = np.array_split(binomial_nonalpha, 40)
     nonalpha_scores = []
-    for batch in seqs_nonalpha:
+    for batch in tqdm(
+        seqs_nonalpha,
+        desc="  nonalpha batches",
+        leave=False
+    ):
         nonalpha_scores.extend(to_tokens_and_logprobs(model, tokenizer, batch.tolist()))
 
     rows = []
@@ -74,16 +82,7 @@ def get_model_prefs(prompt, model_name, tokenizer, model):
 #  MAIN LOOP
 # ==========================================================
 list_of_prompts = [
-    "Well, the ",
-    "So, the ",
-    "Then the ",
-    "Possibly the ",
-    "Or even the ",
-    "Maybe the ",
-    "Perhaps the ",
-    "At times the ",
-    "Suddenly, the ",
-    "Honestly just the "
+    " "
     # "Especially the ",
     # "For instance ",
     # "In some cases ",
@@ -135,26 +134,31 @@ def main():
     nonbinoms = ["0", "50k", "150k", "300k"]
 
     model_names = [
-        f"qing-yao/{condition}_{binomsize}_nb{nonbinom}_{modelsize}_ep{epoch}_lr1e-4_seed42"
-        for condition in conditions
-        for binomsize in binomsizes
-        for nonbinom in nonbinoms
-        for modelsize in modelsizes
-        for epoch in epochs
+        "allenai/Olmo-3-1025-7B",
+        "allenai/OLMo-1B",
+        "openai-community/gpt2-xl"
     ]
+    # model_names = [
+    #     f"qing-yao/{condition}_{binomsize}_nb{nonbinom}_{modelsize}_ep{epoch}_lr1e-4_seed42"
+    #     for condition in conditions
+    #     for binomsize in binomsizes
+    #     for nonbinom in nonbinoms
+    #     for modelsize in modelsizes
+    #     for epoch in epochs
+    # ]
 
-    model_names_base = [
-        f"qing-yao/baseline_nb{nonbinom}_{modelsize}_ep{epoch}_lr1e-4_seed42"
-        for nonbinom in ["50k", "150k", "300k"]
-        for modelsize in modelsizes
-        for epoch in epochs
-    ]
-    #genpref_nunique_nb0_babylm_ep1_lr1e-4_seed42
-    #{genpref, handcoded}; {nb0, nb50k}; {ep1, ep5}
-    types = ["genpref", "handcoded"]
-    nonbinoms = ["nb0", "nb50k"]
-    epochs = ["ep1", "ep5"]
-    baby_lm_names = [f"qing-yao/{type}_nunique_{nonbinom}_babylm_{epoch}_lr1e-4_seed42" for type in types for nonbinom in nonbinoms for epoch in epochs]
+    # model_names_base = [
+    #     f"qing-yao/baseline_nb{nonbinom}_{modelsize}_ep{epoch}_lr1e-4_seed42"
+    #     for nonbinom in ["50k", "150k", "300k"]
+    #     for modelsize in modelsizes
+    #     for epoch in epochs
+    # ]
+    # #genpref_nunique_nb0_babylm_ep1_lr1e-4_seed42
+    # #{genpref, handcoded}; {nb0, nb50k}; {ep1, ep5}
+    # types = ["genpref", "handcoded"]
+    # nonbinoms = ["nb0", "nb50k"]
+    # epochs = ["ep1", "ep5"]
+    # baby_lm_names = [f"qing-yao/{type}_nunique_{nonbinom}_babylm_{epoch}_lr1e-4_seed42" for type in types for nonbinom in nonbinoms for epoch in epochs]
 
 
     model_names.extend([
@@ -163,12 +167,12 @@ def main():
         "EleutherAI/pythia-410m"
     ])
 
-    model_names.extend(baby_lm_names)
+    #model_names.extend(baby_lm_names)
     model_names.extend([
         "qing-yao/binomial-babylm-base_seed-42_1e-3"
     ])
 
-    model_names.extend(model_names_base)
+    # model_names.extend(model_names_base)
     print(len(model_names))
 
     out_dir = "../Data/model_results"
@@ -277,4 +281,4 @@ if __name__ == "__main__":
     main()
     files = glob.glob("../Data/model_results/*.csv")
     df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
-    df.to_csv("../Data/grid_search_results.csv", index=False)
+    df.to_csv("../Data/different_model_results.csv", index=False)

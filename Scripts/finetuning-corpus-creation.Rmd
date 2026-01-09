@@ -456,7 +456,6 @@ simulated_data <- finetuning_handcoded_og_cond %>%
 write_csv(simulated_data, '../Data/hand-coded-data-sampled-without-sentences.csv')
 
 
-
 ```
 
 ```{r}

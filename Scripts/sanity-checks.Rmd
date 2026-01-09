@@ -1,0 +1,159 @@
+---
+title: "Sanity Checks"
+author: "Zachary Houghton"
+date: "2026-01-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Human data
+
+```{r}
+library(tidyverse)
+all_human_data = read_csv('../Human Data and Analyses/all_human_data.csv') %>%
+  mutate(Attested = ifelse(
+    OverallFreq == 0, 0, 1
+  )) %>%
+  select(participant, resp, Word1, Word2, Alpha, Nonalpha, OverallFreq, Word1_freq, Word2_freq, Form, Percept, Culture, Power, Intense, Icon, Freq, Len, Lapse, "*BStress", RelFreq, GenPref, Attested) %>%
+  mutate(y_vals = 0.02191943 + 0.23925834*Form +  0.24889543*Percept +  0.41836997*Culture +   0.25967334*Power +  0.01867604*Intense +  1.30365980*Icon +   0.08553552*Freq +  0.15241566*Len - 0.19381657*Lapse +  0.36019221*`*BStress`) %>%
+  mutate(GenPref = 1/(1+exp(-1*y_vals))) %>%
+  mutate(GenPref = GenPref - 0.5)
+
+all_human_data = all_human_data %>%
+  mutate(resp_binary = case_when(
+    resp == 'alpha' ~ 1,
+    resp == 'nonalpha' ~ 0
+  ))
+
+all_human_data_novel    <- all_human_data %>% filter(Attested == 0)
+all_human_data_attested <- all_human_data %>% filter(Attested == 1)
+
+```
+
+## Compare Human Data to those of the different models
+
+```{r}
+model_results = read_csv('../Data/different_model_results.csv')
+
+model_wide <- model_results %>%
+  pivot_wider(
+    names_from  = model,
+    values_from = preference
+  )
+
+analysis_df <- all_human_data %>%
+  left_join(model_wide, by = "binom")
+
+analysis_df_novel = analysis_df %>%
+  filter(Attested == 0)
+
+analysis_df_attested = analysis_df %>%
+  filter(Attested == 1)
+
+
+
+
+```
+
+## Spearman correlation
+
+```{r}
+analysis_df_novel_collasped = analysis_df_novel %>%
+  group_by(binom) %>%
+  summarize(
+    human_pref = mean(resp_binary),
+    .groups = "drop"
+  )
+
+analysis_df_attested_collasped = analysis_df_attested %>%
+  group_by(binom) %>%
+  summarize(
+    human_pref = mean(resp_binary),
+    .groups = "drop"
+  )
+
+cor(
+  analysis_df$resp_binary,
+  analysis_df$`openai-community/gpt2-xl`,
+  method = "spearman"
+)
+
+
+
+```
+
+## Accuracy
+
+```{r}
+acc_gpt2xl_attested = analysis_df_attested %>%
+  group_by(binom) %>%
+  summarise(
+    human_pref = mean(resp_binary),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    human_dir = if_else(human_pref > 0.5, 1, 0)
+  ) %>%
+  filter(human_pref != 0.5) %>%   # optional: drop ties
+  mutate(
+    model_dir = if_else(`openai-community/gpt2-xl` > 0, 1, 0),
+    correct   = model_dir == human_dir
+  ) %>%
+  summarise(
+    accuracy = mean(correct)
+  )
+
+acc_gpt2xl_novel = analysis_df_novel %>%
+  group_by(binom) %>%
+  summarise(
+    human_pref = mean(resp_binary),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    human_dir = if_else(human_pref > 0.5, 1, 0)
+  ) %>%
+  filter(human_pref != 0.5) %>%   # optional: drop ties
+  mutate(
+    model_dir = if_else(`openai-community/gpt2-xl` > 0, 1, 0),
+    correct   = model_dir == human_dir
+  ) %>%
+  summarise(
+    accuracy = mean(correct)
+  )
+
+
+```
+
+
+## Statistical analysis
+
+```{r}
+library(brms)
+
+gpt2_novel = brm(
+  resp_binary ~ `openai-community/gpt2-xl` + (1 | participant) + (1 | binom),
+  data = analysis_df_novel,
+  family = bernoulli(),
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  chains = 4,
+  seed = 42
+)
+
+gpt2_attested = brm(
+  resp_binary ~ `openai-community/gpt2-xl` + (1 | participant) + (1 | binom),
+  data = analysis_df_attested,
+  family = bernoulli(),
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  chains = 4,
+  seed = 42
+)
+```
+
+
