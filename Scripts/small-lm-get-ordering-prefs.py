@@ -45,7 +45,7 @@ def get_model_prefs(prompt, model_name, tokenizer, model):
     binomial_alpha = df['AandB'].tolist()
     binomial_nonalpha = df['BandA'].tolist()
 
-    seqs_alpha = np.array_split(binomial_alpha, 40)
+    seqs_alpha = np.array_split(binomial_alpha, 100)
     alpha_scores = []
     for batch in tqdm(
         seqs_alpha,
@@ -54,7 +54,7 @@ def get_model_prefs(prompt, model_name, tokenizer, model):
     ):
         alpha_scores.extend(to_tokens_and_logprobs(model, tokenizer, batch.tolist()))
 
-    seqs_nonalpha = np.array_split(binomial_nonalpha, 40)
+    seqs_nonalpha = np.array_split(binomial_nonalpha, 100)
     nonalpha_scores = []
     for batch in tqdm(
         seqs_nonalpha,
@@ -164,7 +164,8 @@ def main():
     model_names.extend([
         "EleutherAI/pythia-70m",
         "EleutherAI/pythia-160m",
-        "EleutherAI/pythia-410m"
+        "EleutherAI/pythia-410m",
+        "facebook/opt-125m"
     ])
 
     #model_names.extend(baby_lm_names)
@@ -205,7 +206,7 @@ def main():
 
         try:
             # -------- LOAD TOKENIZER --------
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code = True)
             if tokenizer.pad_token is None:
                 tokenizer.pad_token = tokenizer.eos_token
             tokenizer.padding_side = "left"
@@ -213,6 +214,7 @@ def main():
             # -------- LOAD MODEL --------
             model = AutoModelForCausalLM.from_pretrained(
                 model_name,
+                trust_remote_code = True,
                 torch_dtype=torch.float16 if device != "cpu" else torch.float32
             ).to(device).eval()
 

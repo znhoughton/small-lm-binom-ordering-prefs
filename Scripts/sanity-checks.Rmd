@@ -13,6 +13,12 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 library(tidyverse)
+
+
+babylm_trigrams =
+  read_csv("../Data/babylm_eng_trigrams.csv") %>%
+  mutate(trigram = tolower(trigram))
+
 all_human_data = read_csv('../Human Data and Analyses/all_human_data.csv') %>%
   mutate(Attested = ifelse(
     OverallFreq == 0, 0, 1
@@ -31,18 +37,105 @@ all_human_data = all_human_data %>%
 all_human_data_novel    <- all_human_data %>% filter(Attested == 0)
 all_human_data_attested <- all_human_data %>% filter(Attested == 1)
 
+
+
+clean_word = function(x) {
+  x %>%
+    tolower() %>%
+    stringr::str_remove_all("^[[:punct:]]+|[[:punct:]]+$")
+}
+
+all_human_data =
+  all_human_data %>%
+  mutate(
+    Word1_clean = clean_word(Word1),
+    Word2_clean = clean_word(Word2)
+  )
+
+all_human_data =
+  all_human_data %>%
+  mutate(
+    babyLM_alpha_trigram    = paste(Word1_clean, "and", Word2_clean),
+    babyLM_nonalpha_trigram = paste(Word2_clean, "and", Word1_clean)
+  )
+
+all_human_data =
+  all_human_data %>%
+  left_join(
+    babylm_trigrams,
+    by = c("babyLM_alpha_trigram" = "trigram")
+  ) %>%
+  rename(babyLMalphacount = count)
+
+all_human_data =
+  all_human_data %>%
+  left_join(
+    babylm_trigrams,
+    by = c("babyLM_nonalpha_trigram" = "trigram")
+  ) %>%
+  rename(babyLMnonalphacount = count)
+
+
+all_human_data =
+  all_human_data %>%
+  mutate(
+    babyLMalphacount    = coalesce(babyLMalphacount, 0L),
+    babyLMnonalphacount = coalesce(babyLMnonalphacount, 0L)
+  )
+
+
+babylm_unigrams =
+  read_csv("../Data/babylm_eng_unigrams.csv") %>%
+  mutate(word = tolower(word))
+
+all_human_data = all_human_data %>%
+  left_join(
+    babylm_unigrams,
+    by = c("Word1_clean" = "word")
+  ) %>%
+  rename(Word1BabyLMCount = count) %>%
+  left_join(
+    babylm_unigrams,
+    by = c("Word2_clean" = "word")
+  ) %>%
+  rename(Word2BabyLMCount = count) %>%
+  mutate(
+    Word1BabyLMCount = coalesce(Word1BabyLMCount, 0L),
+    Word2BabyLMCount = coalesce(Word2BabyLMCount, 0L)
+  )
+
+all_human_data = all_human_data %>%
+  filter(Word1BabyLMCount > 0 & Word2BabyLMCount > 0)
 ```
 
 ## Compare Human Data to those of the different models
 
 ```{r}
-model_results = read_csv('../Data/different_model_results.csv')
+model_results = read_csv('../Data/different_model_results.csv', na = c("", "NA"), trim_ws = F) %>%
+  filter(model %in% c(
+    "EleutherAI/pythia-70m",
+    "openai-community/gpt2-xl",
+    "allenai/Olmo-3-1025-7B",
+    "allenai/OLMo-1B",
+    "qing-yao/binomial-babylm-base_seed-42_1e-3",
+    "facebook/opt-125m"
+  ))
+
+unique(model_results$model)
 
 model_wide <- model_results %>%
+  filter(prompt == " ") %>%
+  group_by(binom, model) %>%
+  summarise(
+    preference = mean(preference),
+    .groups = "drop"
+  ) %>%
   pivot_wider(
     names_from  = model,
     values_from = preference
   )
+
+all_human_data$binom = all_human_data$Alpha
 
 analysis_df <- all_human_data %>%
   left_join(model_wide, by = "binom")
@@ -51,36 +144,98 @@ analysis_df_novel = analysis_df %>%
   filter(Attested == 0)
 
 analysis_df_attested = analysis_df %>%
-  filter(Attested == 1)
+  filter(Attested == 1) 
 
 
-
+analysis_df_novel = analysis_df_novel %>%
+  mutate(
+    Word1 = tolower(Word1),
+    Word2 = tolower(Word2),
+    Word1 = str_remove_all(Word1, "^[[:punct:]]+|[[:punct:]]+$"),
+    Word2 = str_remove_all(Word2, "^[[:punct:]]+|[[:punct:]]+$")
+  ) 
+  
+  
 
 ```
 
 ## Spearman correlation
 
 ```{r}
-analysis_df_novel_collasped = analysis_df_novel %>%
-  group_by(binom) %>%
+analysis_df_novel_collapsed = analysis_df_novel %>%
+  group_by(binom,
+           `EleutherAI/pythia-70m`,
+          `openai-community/gpt2-xl`,
+          `allenai/Olmo-3-1025-7B`,
+          `allenai/OLMo-1B`,
+          `qing-yao/binomial-babylm-base_seed-42_1e-3`,
+          `facebook/opt-125m`) %>%
   summarize(
     human_pref = mean(resp_binary),
-    .groups = "drop"
+    .groups = "keep"
   )
 
-analysis_df_attested_collasped = analysis_df_attested %>%
-  group_by(binom) %>%
+analysis_df_attested_collapsed = analysis_df_attested %>%
+  group_by(binom,
+           `EleutherAI/pythia-70m`,
+          `openai-community/gpt2-xl`,
+          `allenai/Olmo-3-1025-7B`,
+          `allenai/OLMo-1B`,
+          `qing-yao/binomial-babylm-base_seed-42_1e-3`,
+          `facebook/opt-125m`) %>%
   summarize(
     human_pref = mean(resp_binary),
-    .groups = "drop"
+    .groups = "keep"
   )
 
-cor(
-  analysis_df$resp_binary,
-  analysis_df$`openai-community/gpt2-xl`,
-  method = "spearman"
+
+model_cols = c(
+  "EleutherAI/pythia-70m",
+  "openai-community/gpt2-xl",
+  "allenai/Olmo-3-1025-7B",
+  "allenai/OLMo-1B",
+  "qing-yao/binomial-babylm-base_seed-42_1e-3",
+  "facebook/opt-125m"
 )
 
+spearman_results_novel =
+  analysis_df_novel_collapsed %>%
+  pivot_longer(
+    cols = all_of(model_cols),
+    names_to  = "model",
+    values_to = "model_pref"
+  ) %>%
+  group_by(model) %>%
+  summarize(
+    spearman_r = cor(
+      human_pref,
+      model_pref,
+      method = "spearman",
+      use = "complete.obs"
+    ),
+    .groups = "drop"
+  )
+
+spearman_results_attested =
+  analysis_df_attested_collapsed %>%
+  pivot_longer(
+    cols = all_of(model_cols),
+    names_to  = "model",
+    values_to = "model_pref"
+  ) %>%
+  group_by(model) %>%
+  summarize(
+    spearman_r = cor(
+      human_pref,
+      model_pref,
+      method = "spearman",
+      use = "complete.obs"
+    ),
+    .groups = "drop"
+  )
+
+spearman_results_novel
+spearman_results_attested
 
 
 ```
@@ -88,72 +243,303 @@ cor(
 ## Accuracy
 
 ```{r}
-acc_gpt2xl_attested = analysis_df_attested %>%
-  group_by(binom) %>%
-  summarise(
-    human_pref = mean(resp_binary),
+accuracy_results_novel =
+  analysis_df_novel_collapsed %>%
+  pivot_longer(
+    cols = all_of(model_cols),
+    names_to  = "model",
+    values_to = "model_pref"
+  ) %>%
+  mutate(
+    correct =
+      (model_pref > 0 & human_pref > 0.5) |
+      (model_pref < 0 & human_pref < 0.5)
+  ) %>%
+  group_by(model) %>%
+  summarize(
+    accuracy = mean(correct, na.rm = TRUE),
+    n = sum(!is.na(correct)),
     .groups = "drop"
-  ) %>%
-  mutate(
-    human_dir = if_else(human_pref > 0.5, 1, 0)
-  ) %>%
-  filter(human_pref != 0.5) %>%   # optional: drop ties
-  mutate(
-    model_dir = if_else(`openai-community/gpt2-xl` > 0, 1, 0),
-    correct   = model_dir == human_dir
-  ) %>%
-  summarise(
-    accuracy = mean(correct)
   )
 
-acc_gpt2xl_novel = analysis_df_novel %>%
-  group_by(binom) %>%
-  summarise(
-    human_pref = mean(resp_binary),
+accuracy_results_attested =
+  analysis_df_attested_collapsed %>%
+  pivot_longer(
+    cols = all_of(model_cols),
+    names_to  = "model",
+    values_to = "model_pref"
+  ) %>%
+  mutate(
+    correct =
+      (model_pref > 0 & human_pref > 0.5) |
+      (model_pref < 0 & human_pref < 0.5)
+  ) %>%
+  group_by(model) %>%
+  summarize(
+    accuracy = mean(correct, na.rm = TRUE),
+    n = sum(!is.na(correct)),
     .groups = "drop"
-  ) %>%
-  mutate(
-    human_dir = if_else(human_pref > 0.5, 1, 0)
-  ) %>%
-  filter(human_pref != 0.5) %>%   # optional: drop ties
-  mutate(
-    model_dir = if_else(`openai-community/gpt2-xl` > 0, 1, 0),
-    correct   = model_dir == human_dir
-  ) %>%
-  summarise(
-    accuracy = mean(correct)
   )
 
-
+accuracy_results_novel
+accuracy_results_attested
 ```
+
+### full table
+
+```{r}
+final_model_table =
+  accuracy_results_novel %>%
+  rename(acc_novel = accuracy) %>%
+  left_join(
+    accuracy_results_attested %>%
+      rename(acc_attested = accuracy),
+    by = "model"
+  ) %>%
+  left_join(
+    spearman_results_novel %>%
+      rename(rho_novel = spearman_r),
+    by = "model"
+  ) %>%
+  left_join(
+    spearman_results_attested %>%
+      rename(rho_attested = spearman_r),
+    by = "model"
+  )
+
+final_model_table
+```
+
 
 
 ## Statistical analysis
 
+  
 ```{r}
 library(brms)
 
-gpt2_novel = brm(
-  resp_binary ~ `openai-community/gpt2-xl` + (1 | participant) + (1 | binom),
-  data = analysis_df_novel,
-  family = bernoulli(),
-  cores = 4,
-  iter = 2000,
-  warmup = 1000,
-  chains = 4,
-  seed = 42
-)
+library(janitor)
 
-gpt2_attested = brm(
-  resp_binary ~ `openai-community/gpt2-xl` + (1 | participant) + (1 | binom),
-  data = analysis_df_attested,
-  family = bernoulli(),
-  cores = 4,
-  iter = 2000,
-  warmup = 1000,
-  chains = 4,
-  seed = 42
-)
+analysis_df_novel_clean =
+  analysis_df_novel %>%
+  rename_with(make.names, all_of(model_cols))
+
+analysis_df_attested_clean =
+  analysis_df_attested %>%
+  rename_with(make.names, all_of(model_cols))
+
+model_lookup =
+  tibble(
+    model_raw   = model_cols,
+    model_clean = make.names(model_cols)
+  )
+
+
+fit_model = function(df, model_col_clean, seed = 42) {
+
+  formula =
+    bf(
+      as.formula(
+        paste0(
+          "resp_binary ~ ", model_col_clean,
+          " + (1 | participant) + (1 | binom)"
+        )
+      )
+    )
+
+  brm(
+    formula,
+    data = df,
+    family = bernoulli(),
+    cores = 4,
+    iter = 6000,
+    warmup = 3000,
+    chains = 4,
+    seed = seed,
+    save_pars = save_pars(all = TRUE)
+  )
+}
+
+
+fits_novel =
+  model_lookup %>%
+  mutate(
+    fit = map(
+      model_clean,
+      ~ fit_model(analysis_df_novel_clean, .x)
+    ),
+    loo = map(fit, loo),
+    condition = "novel"
+  )
+
+fits_attested =
+  model_lookup %>%
+  mutate(
+    fit = map(
+      model_clean,
+      ~ fit_model(analysis_df_attested_clean, .x)
+    ),
+    loo = map(fit, loo),
+    condition = "attested"
+  )
+
+loo_comparisons =
+  bind_rows(fits_novel, fits_attested) %>%
+  group_by(condition) %>%
+  summarise(
+    loo_cmp = list(
+      loo_compare(!!!set_names(loo, model_raw))
+    ),
+    .groups = "drop"
+  )
+
+loo_table =
+  loo_comparisons %>%
+  mutate(
+    loo_cmp = map(loo_cmp, ~ as.data.frame(.x) %>% rownames_to_column("model"))
+  ) %>%
+  unnest(loo_cmp) %>%
+  rename(
+    elpd_diff = elpd_diff,
+    se_diff   = se_diff
+  ) %>%
+  arrange(condition, desc(elpd_diff))
+
+loo_table
+
 ```
 
+```{r}
+library(tidyverse)
+library(brms)
+
+extract_model_effect = function(fit) {
+  fe = fixef(fit)
+
+  tibble(
+    beta      = fe[2, "Estimate"],
+    se        = fe[2, "Est.Error"],
+    ci_low    = fe[2, "Q2.5"],
+    ci_high   = fe[2, "Q97.5"],
+    odds_ratio = exp(beta),
+    or_low     = exp(ci_low),
+    or_high    = exp(ci_high)
+  )
+}
+
+model_prediction_table =
+  bind_rows(
+    fits_novel %>%
+      mutate(
+        stats = map(fit, extract_model_effect),
+        condition = "novel"
+      ),
+    fits_attested %>%
+      mutate(
+        stats = map(fit, extract_model_effect),
+        condition = "attested"
+      )
+  ) %>%
+  unnest(stats) %>%
+  select(
+    model = model_raw,
+    condition,
+    beta,
+    odds_ratio,
+    or_low,
+    or_high
+  )
+
+```
+
+```{r}
+model_prediction_table
+```
+
+
+## babylm vs relfreq
+
+```{r}
+# attested
+
+analysis_df_attested_clean = analysis_df_attested_clean %>% mutate(babylm_rel_freq = babyLMalphacount / (babyLMalphacount + babyLMnonalphacount))
+
+analysis_df_attested_clean = analysis_df_attested_clean %>%
+  mutate(babylm_rel_freq = case_when(
+    is.na(babylm_rel_freq) ~ 0.5,
+    !is.na(babylm_rel_freq) ~ babylm_rel_freq
+  ))
+
+eps = 1e-6
+analysis_df_attested_clean =
+  analysis_df_attested_clean %>%
+  mutate(
+    babylm_rel_freq_clip =
+      pmin(pmax(babylm_rel_freq, eps), 1 - eps),
+    babylm_rel_freq_logit =
+      qlogis(babylm_rel_freq_clip)
+  )
+m_babylm = brm(resp_binary ~ qing.yao.binomial.babylm.base_seed.42_1e.3 + (1 | participant) + (1 | binom),
+                       data = analysis_df_attested_clean,
+                       family = bernoulli(),
+                       cores = 4,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       save_pars = save_pars(all = TRUE),
+                       seed = 42) %>%
+  add_criterion("loo")
+
+m_babylm_relfreq = brm(resp_binary ~ babylm_rel_freq_logit + (1 | participant) + (1 | binom),
+                       data = analysis_df_attested_clean,
+                       family = bernoulli(),
+                       cores = 4,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       save_pars = save_pars(all = TRUE),
+                       seed = 42) 
+
+m_babylm_relfreq = m_babylm_relfreq %>%
+  add_criterion("loo")
+
+loo_compare(m_babylm, m_babylm_relfreq)
+
+
+m_babylm_both = brm(resp_binary ~ qing.yao.binomial.babylm.base_seed.42_1e.3 + babylm_rel_freq_logit + (1 | participant) + (1 | binom),
+                       data = analysis_df_attested_clean,
+                       family = bernoulli(),
+                       cores = 4,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       #save_pars = save_pars(all = TRUE),
+                       seed = 42) 
+
+cor(analysis_df_attested_clean$qing.yao.binomial.babylm.base_seed.42_1e.3,
+    analysis_df_attested_clean$babylm_rel_freq_logit)
+
+fixef(m_babylm_both)
+```
+
+## BabyLM by individual constraints:
+
+```{r}
+analysis_df_attested_clean = analysis_df_attested_clean %>%
+  rename(no_final_stress = `*BStress`)
+
+babylm_indiv_constraints = brm(qing.yao.binomial.babylm.base_seed.42_1e.3 ~ (Culture + Power + Freq + Len + no_final_stress + Intense + Percept + Lapse) + (1 | participant) + ( 1 | Alpha),
+                       data = analysis_df_attested_clean,
+                       #prior = prior_probs,
+                       iter = 6000,
+                       warmup = 3000,
+                       chains = 4,
+                       cores = 4,
+                       #control = list(adapt_delta=0.99, max_treedepth = 15),
+                       #control = list(max_treedepth = 20),
+                       #file = '../Data/all_models_all_prefixes_all_constraints'
+                      )
+
+fixef(babylm_indiv_constraints)
+```
 
